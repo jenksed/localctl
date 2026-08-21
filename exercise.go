@@ -36,13 +36,21 @@ type exercise struct {
 }
 
 type evaluationResult struct {
-	Mode   string `json:"mode"`
-	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
+	Mode        string `json:"mode"`
+	Status      string `json:"status"`
+	FailureKind string `json:"failure_kind,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+func allExerciseCatalog() []exercise {
+	items := append([]exercise{}, baselineExerciseCatalog()...)
+	items = append(items, expandedExerciseCatalog()...)
+	items = append(items, developerWorkflowExerciseCatalog()...)
+	return items
 }
 
 func findExercise(id string) (exercise, bool) {
-	for _, candidate := range baselineExerciseCatalog() {
+	for _, candidate := range allExerciseCatalog() {
 		if candidate.ID == id {
 			return candidate, true
 		}
@@ -53,7 +61,7 @@ func findExercise(id string) (exercise, bool) {
 func exerciseCategories() []string {
 	seen := map[string]bool{}
 	var categories []string
-	for _, item := range baselineExerciseCatalog() {
+	for _, item := range allExerciseCatalog() {
 		if !seen[item.Category] {
 			seen[item.Category] = true
 			categories = append(categories, item.Category)
@@ -65,7 +73,7 @@ func exerciseCategories() []string {
 
 func exercisesForCategory(category string, includeExtended bool) []exercise {
 	var result []exercise
-	for _, item := range baselineExerciseCatalog() {
+	for _, item := range allExerciseCatalog() {
 		if category != "" && item.Category != category {
 			continue
 		}
@@ -85,10 +93,17 @@ func evaluateExercise(item exercise, response string) evaluationResult {
 		if actual == expected {
 			return evaluationResult{Mode: string(evaluationExact), Status: "pass"}
 		}
+		failureKind := "incorrect_answer"
+		if actual == "" {
+			failureKind = "empty_output"
+		} else if strings.HasPrefix(actual, expected) {
+			failureKind = "contract_extra_output"
+		}
 		return evaluationResult{
-			Mode:   string(evaluationExact),
-			Status: "fail",
-			Detail: fmt.Sprintf("expected %q, got %q", expected, actual),
+			Mode:        string(evaluationExact),
+			Status:      "fail",
+			FailureKind: failureKind,
+			Detail:      fmt.Sprintf("expected %q, got %q", expected, actual),
 		}
 
 	case evaluationContainsAll:
@@ -102,28 +117,45 @@ func evaluateExercise(item exercise, response string) evaluationResult {
 		if len(missing) == 0 {
 			return evaluationResult{Mode: string(evaluationContainsAll), Status: "pass"}
 		}
+		failureKind := "missing_required_concepts"
+		if strings.TrimSpace(response) == "" {
+			failureKind = "empty_output"
+		}
 		return evaluationResult{
-			Mode:   string(evaluationContainsAll),
-			Status: "fail",
-			Detail: "missing required concepts: " + strings.Join(missing, ", "),
+			Mode:        string(evaluationContainsAll),
+			Status:      "fail",
+			FailureKind: failureKind,
+			Detail:      "missing required concepts: " + strings.Join(missing, ", "),
 		}
 
 	case evaluationJSONExact:
 		var expected any
 		if err := json.Unmarshal([]byte(item.Evaluation.ExpectedJSON), &expected); err != nil {
 			return evaluationResult{
-				Mode:   string(evaluationJSONExact),
-				Status: "error",
-				Detail: "invalid exercise expectation: " + err.Error(),
+				Mode:        string(evaluationJSONExact),
+				Status:      "error",
+				FailureKind: "invalid_exercise",
+				Detail:      "invalid exercise expectation: " + err.Error(),
+			}
+		}
+
+		trimmed := strings.TrimSpace(response)
+		if trimmed == "" {
+			return evaluationResult{
+				Mode:        string(evaluationJSONExact),
+				Status:      "fail",
+				FailureKind: "empty_output",
+				Detail:      "response was empty",
 			}
 		}
 
 		var actual any
-		if err := json.Unmarshal([]byte(strings.TrimSpace(response)), &actual); err != nil {
+		if err := json.Unmarshal([]byte(trimmed), &actual); err != nil {
 			return evaluationResult{
-				Mode:   string(evaluationJSONExact),
-				Status: "fail",
-				Detail: "response was not valid JSON: " + err.Error(),
+				Mode:        string(evaluationJSONExact),
+				Status:      "fail",
+				FailureKind: "invalid_json",
+				Detail:      "response was not valid JSON: " + err.Error(),
 			}
 		}
 
@@ -132,9 +164,10 @@ func evaluateExercise(item exercise, response string) evaluationResult {
 		}
 
 		return evaluationResult{
-			Mode:   string(evaluationJSONExact),
-			Status: "fail",
-			Detail: "valid JSON did not match the expected value",
+			Mode:        string(evaluationJSONExact),
+			Status:      "fail",
+			FailureKind: "structured_mismatch",
+			Detail:      "valid JSON did not match the expected value",
 		}
 
 	case evaluationManual:
@@ -146,9 +179,10 @@ func evaluateExercise(item exercise, response string) evaluationResult {
 
 	default:
 		return evaluationResult{
-			Mode:   string(item.Evaluation.Kind),
-			Status: "error",
-			Detail: "unknown evaluation mode",
+			Mode:        string(item.Evaluation.Kind),
+			Status:      "error",
+			FailureKind: "unknown_evaluator",
+			Detail:      "unknown evaluation mode",
 		}
 	}
 }
