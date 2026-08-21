@@ -29,13 +29,13 @@ type experimentRecord struct {
 }
 
 type observationScope struct {
-	ExperimentID string
-	SessionID    string
-	Experiment   string
+	ExperimentID   string
+	SessionID      string
+	Experiment     string
 	ExperimentKind string
-	Profile      profileDefinition
-	Pack         packManifest
-	InputClass   string
+	Profile        profileDefinition
+	Pack           packManifest
+	InputClass     string
 }
 
 var scopedObservation *observationScope
@@ -80,6 +80,7 @@ func startScopedExperiment(kind, name string, model modelArtifact, profile profi
 	record := experimentRecord{
 		SchemaVersion: 1,
 		ID:            newExperimentID(now),
+		SessionID:     activeSessionID,
 		Name:          name,
 		Kind:          kind,
 		ModelID:       model.ID,
@@ -93,15 +94,7 @@ func startScopedExperiment(kind, name string, model modelArtifact, profile profi
 	}
 	_ = saveExperiment(record)
 	previous := scopedObservation
-	scopedObservation = &observationScope{
-		ExperimentID: record.ID,
-		SessionID: record.SessionID,
-		Experiment: record.Name,
-		ExperimentKind: record.Kind,
-		Profile: profile,
-		Pack: pack,
-		InputClass: inputClass,
-	}
+	scopedObservation = &observationScope{ExperimentID: record.ID, SessionID: record.SessionID, Experiment: record.Name, ExperimentKind: record.Kind, Profile: profile, Pack: pack, InputClass: inputClass}
 	finish := func() {
 		record.CompletedAt = time.Now()
 		record.Status = "completed"
@@ -140,26 +133,11 @@ func currentObservationScope(item exercise) observationScope {
 			profile = defaultProfile()
 		}
 		pack, _ := findPack(record.PackID)
-		return observationScope{
-			ExperimentID: record.ID,
-			SessionID: record.SessionID,
-			Experiment: record.Name,
-			ExperimentKind: record.Kind,
-			Profile: profile,
-			Pack: pack,
-			InputClass: record.InputClass,
-		}
+		return observationScope{ExperimentID: record.ID, SessionID: record.SessionID, Experiment: record.Name, ExperimentKind: record.Kind, Profile: profile, Pack: pack, InputClass: record.InputClass}
 	}
 	profile := defaultProfile()
 	pack := inferredPackForExercise(item)
-	return observationScope{
-		ExperimentID: newExperimentID(time.Now()),
-		Experiment: "single run",
-		ExperimentKind: "single",
-		Profile: profile,
-		Pack: pack,
-		InputClass: inferredInputClass(item),
-	}
+	return observationScope{ExperimentID: newExperimentID(time.Now()), SessionID: activeSessionID, Experiment: "single run", ExperimentKind: "single", Profile: profile, Pack: pack, InputClass: inferredInputClass(item)}
 }
 
 func inferredInputClass(item exercise) string {
