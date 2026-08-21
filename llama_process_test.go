@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -159,4 +160,131 @@ func lastLines(text string, count int) string {
 	}
 
 	return strings.Join(lines[len(lines)-count:], "\n")
+}
+
+func TestLlamaServerGracefulTermination(t *testing.T) {
+	if os.Getenv("LOCALCTL_INTEGRATION") != "1" {
+		t.Skip("set LOCALCTL_INTEGRATION=1 to run real llama-server integration test")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("could not determine home directory: %v", err)
+	}
+
+	modelPath := filepath.Join(
+		home,
+		".lmstudio",
+		"models",
+		"ibm-granite",
+		"granite-4.1-8b-GGUF",
+		"granite-4.1-8b-Q4_K_S.gguf",
+	)
+
+	const port = "18081"
+	baseURL := "http://127.0.0.1:" + port
+
+	var logs bytes.Buffer
+
+	cmd := exec.Command(
+		"/opt/homebrew/bin/llama-server",
+		"--model", modelPath,
+		"--host", "127.0.0.1",
+		"--port", port,
+		"--ctx-size", "2048",
+	)
+
+	cmd.Stdout = &logs
+	cmd.Stderr = &logs
+
+	start := time.Now()
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("could not start llama-server: %v", err)
+	}
+
+	t.Logf("llama-server PID: %d", cmd.Process.Pid)
+
+	defer func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+
+	deadline := time.Now().Add(30 * time.Second)
+
+	for {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+
+		if runtimeStatus(baseURL, &stdout, &stderr) == 0 {
+			t.Logf(
+				"runtime became ready after: %s",
+				time.Since(start),
+			)
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf(
+				"llama-server did not become ready\nlogs:\n%s",
+				logs.String(),
+			)
+		}
+
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	shutdownStart := time.Now()
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("could not send SIGTERM to llama-server: %v", err)
+	}
+
+	waitResult := make(chan error, 1)
+
+	go func() {
+		waitResult <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-waitResult:
+		t.Logf(
+			"Wait returned after SIGTERM in: %s",
+			time.Since(shutdownStart),
+		)
+		t.Logf("Wait error: %v", err)
+
+		if err != nil {
+			t.Fatalf(
+				"expected llama-server to shut down gracefully, got: %v",
+				err,
+			)
+		}
+
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-waitResult
+
+		t.Fatalf("llama-server did not exit within 5 seconds of SIGTERM")
+	}
+
+	if cmd.ProcessState == nil {
+		t.Fatalf("expected ProcessState after Wait")
+	}
+
+	if !cmd.ProcessState.Success() {
+		t.Fatalf("expected graceful llama-server shutdown")
+	}
+
+	t.Logf(
+		"llama-server total lifetime: %s",
+		time.Since(start),
+	)
+
+	t.Logf(
+		"shutdown log tail:\n%s",
+		lastLines(logs.String(), 20),
+	)
 }

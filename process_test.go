@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -108,5 +109,45 @@ func TestChildProcessTermination(t *testing.T) {
 
 	if cmd.ProcessState.Success() {
 		t.Fatalf("expected killed child to be unsuccessful")
+	}
+}
+
+func TestChildProcessGracefulTermination(t *testing.T) {
+	cmd := exec.Command(
+		"/bin/sh",
+		"-c",
+		`trap 'exit 0' TERM; while true; do sleep 1; done`,
+	)
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("could not start child: %v", err)
+	}
+
+	t.Logf("child PID: %d", cmd.Process.Pid)
+
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("could not signal child: %v", err)
+	}
+
+	err := cmd.Wait()
+	elapsed := time.Since(start)
+
+	t.Logf("Wait returned after SIGTERM in: %s", elapsed)
+	t.Logf("Wait error: %v", err)
+
+	if err != nil {
+		t.Fatalf("expected graceful child shutdown, got: %v", err)
+	}
+
+	if cmd.ProcessState == nil {
+		t.Fatalf("expected ProcessState after Wait")
+	}
+
+	if !cmd.ProcessState.Success() {
+		t.Fatalf("expected graceful shutdown to succeed")
 	}
 }
