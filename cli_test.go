@@ -22,18 +22,11 @@ func TestCLI(t *testing.T) {
 			wantStderr: "",
 		},
 		{
-			name:       "missing command",
-			args:       []string{"localctl"},
-			wantExit:   1,
-			wantStdout: "",
-			wantStderr: "usage: localctl <command>\n",
-		},
-		{
 			name:       "unknown command",
 			args:       []string{"localctl", "garbage"},
 			wantExit:   1,
 			wantStdout: "",
-			wantStderr: "unknown command: garbage\n",
+			wantStderr: "unknown command: garbage\nRun 'localctl help' to see the learner-facing command map.\n",
 		},
 		{
 			name:       "capability missing model",
@@ -97,10 +90,22 @@ func TestCLI(t *testing.T) {
 	}
 }
 
+func TestRootCLIShowsLearnerHelp(t *testing.T) {
+	for _, args := range [][]string{{"localctl"}, {"localctl", "help"}, {"localctl", "--help"}} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("help path %v returned %d: %s", args, code, stderr.String())
+		}
+		for _, want := range []string{"Start", "localctl lab", "Compare and learn", "Read the evidence", "Glass box", "localctl capability", "localctl recommend"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("help path %v missing %q:\n%s", args, want, stdout.String())
+			}
+		}
+	}
+}
+
 func TestRuntimeInferJoinsPromptArguments(t *testing.T) {
-	// The network path is deliberately not invoked here; this regression is
-	// guarded at the CLI-source level by ensuring multi-word prompt handling is
-	// part of the public command behavior rather than documenting a one-arg trap.
 	if !strings.Contains("runtime infer <prompt>", "<prompt>") {
 		t.Fatal("sanity check failed")
 	}

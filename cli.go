@@ -8,11 +8,12 @@ import (
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
-		fmt.Fprintln(stderr, "usage: localctl <command>")
-		return 1
+		return runHelp(stdout)
 	}
 
 	switch args[1] {
+	case "help", "--help", "-h":
+		return runHelp(stdout)
 	case "version":
 		fmt.Fprintf(stdout, "localctl %s\n", localctlVersion)
 		return 0
@@ -23,7 +24,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "check":
 		return runCheck(stdout, stderr)
 	case "models":
-		return runModels(stdout, stderr)
+		return runModelsV031(stdout, stderr)
 	case "explore":
 		return runExplore(args, stdout, stderr)
 	case "profiles":
@@ -88,6 +89,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRuntime(args, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[1])
+		fmt.Fprintln(stderr, "Run 'localctl help' to see the learner-facing command map.")
 		return 1
 	}
 }
