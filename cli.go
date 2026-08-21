@@ -27,7 +27,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runRuntime(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 3 {
-		fmt.Fprintln(stderr, "usage: localctl runtime <status|inspect|infer>")
+		fmt.Fprintln(stderr, "usage: localctl runtime <start|stop|status|inspect|infer>")
 		return 1
 	}
 
@@ -45,6 +45,12 @@ func runRuntime(args []string, stdout, stderr io.Writer) int {
 		}
 
 		return runtimeInfer(runtimeURL, args[3], stdout, stderr)
+
+	case "start":
+		return runtimeStart(stdout, stderr)
+
+	case "stop":
+		return runtimeStop(stdout, stderr)
 
 	default:
 		fmt.Fprintf(stderr, "unknown runtime command: %s\n", args[2])
