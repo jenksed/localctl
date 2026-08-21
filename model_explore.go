@@ -12,12 +12,12 @@ import (
 )
 
 type modelRadarCandidate struct {
-	Name      string
-	Quant     string
-	FileSize  string
-	Tier      string
-	Why       string
-	Source    string
+	Name     string
+	Quant    string
+	FileSize string
+	Tier     string
+	Why      string
+	Source   string
 }
 
 var m1ProRadar = []modelRadarCandidate{
