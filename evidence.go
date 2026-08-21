@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-const evidenceSchemaVersion = 1
+const evidenceSchemaVersion = 2
 
 type runObservation struct {
 	SchemaVersion int       `json:"schema_version"`
@@ -21,20 +22,25 @@ type runObservation struct {
 	StartedAt     time.Time `json:"started_at"`
 	CompletedAt   time.Time `json:"completed_at"`
 	Exercise      struct {
-		ID         string `json:"id"`
-		Title      string `json:"title"`
-		Category   string `json:"category"`
-		Difficulty string `json:"difficulty"`
+		ID           string `json:"id"`
+		Title        string `json:"title"`
+		Category     string `json:"category"`
+		Difficulty   string `json:"difficulty"`
+		PromptSHA256 string `json:"prompt_sha256,omitempty"`
 	} `json:"exercise"`
 	Model struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Path string `json:"path"`
-		Size int64  `json:"size_bytes"`
+		ID                  string `json:"id"`
+		Name                string `json:"name"`
+		Path                string `json:"path"`
+		Size                int64  `json:"size_bytes"`
+		ArtifactMetadataKey string `json:"artifact_metadata_key,omitempty"`
 	} `json:"model"`
 	Runtime struct {
-		Kind string `json:"kind"`
-		URL  string `json:"url"`
+		Kind       string `json:"kind"`
+		URL        string `json:"url"`
+		PID        int    `json:"pid,omitempty"`
+		Executable string `json:"executable,omitempty"`
+		StartedAt  string `json:"started_at,omitempty"`
 	} `json:"runtime"`
 	Configuration struct {
 		Context     int     `json:"context"`
@@ -50,6 +56,9 @@ type runObservation struct {
 		ElapsedMS           int64   `json:"elapsed_ms"`
 		PromptTokensPerSec  float64 `json:"prompt_tokens_per_second,omitempty"`
 		GenerationTokensSec float64 `json:"generation_tokens_per_second,omitempty"`
+		ResponseSHA256      string  `json:"response_sha256,omitempty"`
+		VisibleCharacters   int     `json:"visible_characters,omitempty"`
+		EmptyVisibleOutput  bool    `json:"empty_visible_output,omitempty"`
 		Error               string  `json:"error,omitempty"`
 	} `json:"result"`
 	Evaluation evaluationResult `json:"evaluation"`
@@ -69,6 +78,15 @@ func newRunID(now time.Time) string {
 		return "run_" + now.UTC().Format("20060102T150405.000000000")
 	}
 	return "run_" + now.UTC().Format("20060102T150405.000") + "_" + hex.EncodeToString(buf)
+}
+
+func textSHA256(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func artifactMetadataKey(model modelArtifact) string {
+	return textSHA256(fmt.Sprintf("%s\n%d", model.Path, model.Size))
 }
 
 func evidenceRoot() (string, error) {
@@ -92,12 +110,19 @@ func persistObservation(item exercise, model modelArtifact, startedAt time.Time,
 	record.Exercise.Title = item.Title
 	record.Exercise.Category = item.Category
 	record.Exercise.Difficulty = item.Difficulty
+	record.Exercise.PromptSHA256 = textSHA256(item.Prompt)
 	record.Model.ID = model.ID
 	record.Model.Name = model.Name
 	record.Model.Path = model.Path
 	record.Model.Size = model.Size
+	record.Model.ArtifactMetadataKey = artifactMetadataKey(model)
 	record.Runtime.Kind = "llama.cpp"
 	record.Runtime.URL = runtimeURL
+	if state, err := readRuntimeState(); err == nil && state.Model == model.Path {
+		record.Runtime.PID = state.PID
+		record.Runtime.Executable = state.Executable
+		record.Runtime.StartedAt = state.StartedAt.Format(time.RFC3339Nano)
+	}
 	record.Configuration.Context = 2048
 	record.Configuration.Temperature = 0
 	record.Configuration.MaxTokens = 512
@@ -106,7 +131,7 @@ func persistObservation(item exercise, model modelArtifact, startedAt time.Time,
 	if inferenceErr != nil {
 		record.Result.Status = "failed"
 		record.Result.Error = inferenceErr.Error()
-		record.Evaluation = evaluationResult{Mode: "not_evaluated", Status: "not_evaluated", Detail: "inference failed"}
+		record.Evaluation = evaluationResult{Mode: "not_evaluated", Status: "not_evaluated", FailureKind: "inference_error", Detail: "inference failed"}
 	} else {
 		record.Result.Status = "succeeded"
 		record.Result.FinishReason = outcome.FinishReason
@@ -115,6 +140,9 @@ func persistObservation(item exercise, model modelArtifact, startedAt time.Time,
 		record.Result.TotalTokens = outcome.TotalTokens
 		record.Result.PromptTokensPerSec = outcome.PromptPerSecond
 		record.Result.GenerationTokensSec = outcome.GenerationPerSecond
+		record.Result.ResponseSHA256 = textSHA256(outcome.Content)
+		record.Result.VisibleCharacters = len([]rune(outcome.Content))
+		record.Result.EmptyVisibleOutput = strings.TrimSpace(outcome.Content) == ""
 		record.Evaluation = evaluateExercise(item, outcome.Content)
 	}
 
@@ -212,6 +240,79 @@ func listObservations() ([]runObservation, error) {
 	return result, nil
 }
 
+func scanObservationFiles() ([]runObservation, map[string]string, error) {
+	root, err := evidenceRoot()
+	if err != nil {
+		return nil, nil, err
+	}
+	var records []runObservation
+	paths := map[string]string{}
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() || entry.Name() != "observation.json" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		var record runObservation
+		if decodeErr := json.Unmarshal(data, &record); decodeErr != nil {
+			return fmt.Errorf("decode %s: %w", path, decodeErr)
+		}
+		records = append(records, record)
+		paths[record.RunID] = filepath.Dir(path)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].StartedAt.Before(records[j].StartedAt) })
+	return records, paths, nil
+}
+
+func rebuildObservationIndex() (int, error) {
+	root, err := evidenceRoot()
+	if err != nil {
+		return 0, err
+	}
+	records, _, err := scanObservationFiles()
+	if err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return 0, err
+	}
+	tmp := filepath.Join(root, "index.ndjson.tmp")
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return 0, err
+	}
+	for _, record := range records {
+		line, marshalErr := json.Marshal(record)
+		if marshalErr != nil {
+			_ = file.Close()
+			return 0, marshalErr
+		}
+		if _, writeErr := file.Write(append(line, '\n')); writeErr != nil {
+			_ = file.Close()
+			return 0, writeErr
+		}
+	}
+	if err := file.Close(); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmp, filepath.Join(root, "index.ndjson")); err != nil {
+		return 0, err
+	}
+	return len(records), nil
+}
+
 func findObservation(runID string) (runObservation, string, error) {
 	root, err := evidenceRoot()
 	if err != nil {
@@ -238,6 +339,7 @@ func findObservation(runID string) (runObservation, string, error) {
 	if err != nil {
 		return runObservation{}, "", err
 	}
+
 	if foundPath == "" {
 		return runObservation{}, "", fmt.Errorf("run %q not found", runID)
 	}
