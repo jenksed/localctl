@@ -17,6 +17,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "localctl %s\n", localctlVersion)
 		return 0
 	case "lab":
+		fmt.Fprintln(stdout, localctlBanner)
+		fmt.Fprintln(stdout)
 		return runV03Lab(stdout, stderr)
 	case "check":
 		return runCheck(stdout, stderr)
@@ -40,6 +42,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runMission(args, stdout, stderr)
 	case "audition":
 		return runAudition(args, stdout, stderr)
+	case "headtohead":
+		return runHeadToHead(args, stdout, stderr)
 	case "verify":
 		return runVerify(args, stdout, stderr)
 	case "work":
