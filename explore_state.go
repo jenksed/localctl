@@ -85,16 +85,38 @@ func candidateKey(candidate modelRadarCandidate) string {
 }
 
 func candidateInstalled(candidate modelRadarCandidate, models []modelArtifact) bool {
-	needle := modelSlug(candidate.Name)
-	if needle == "" {
-		return false
-	}
+	needles := candidateFamilyNeedles(candidate)
 	for _, model := range models {
-		if strings.Contains(model.ID, needle) || strings.Contains(needle, model.ID) {
-			return true
+		for _, needle := range needles {
+			if len(needle) < 4 {
+				continue
+			}
+			if strings.Contains(model.ID, needle) || strings.Contains(needle, model.ID) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func candidateFamilyNeedles(candidate modelRadarCandidate) []string {
+	seen := map[string]bool{}
+	var result []string
+	add := func(value string) {
+		value = modelSlug(value)
+		value = strings.TrimSuffix(value, "-gguf")
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	add(candidate.Name)
+	if candidate.Repository != "" {
+		parts := strings.Split(strings.Trim(candidate.Repository, "/"), "/")
+		add(parts[len(parts)-1])
+	}
+	return result
 }
 
 func pruneInstalledSelections(state exploreState, models []modelArtifact) (exploreState, bool) {
