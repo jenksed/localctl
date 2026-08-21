@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRuntimeStatusHealthy(t *testing.T) {
@@ -439,6 +440,53 @@ func TestRuntimeInspectNoModels(t *testing.T) {
 	}
 
 	if stderr.String() != "runtime inspection returned no models\n" {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestRuntimeStatusSlowServer(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-time.After(2 * time.Second):
+				w.WriteHeader(http.StatusOK)
+
+			case <-r.Context().Done():
+				return
+			}
+		}),
+	)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	start := time.Now()
+
+	exitCode := runtimeStatus(
+		server.URL,
+		&stdout,
+		&stderr,
+	)
+
+	elapsed := time.Since(start)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit 1, got %d", exitCode)
+	}
+
+	if elapsed >= 1500*time.Millisecond {
+		t.Fatalf(
+			"expected runtime status to time out before 1.5s, took %s",
+			elapsed,
+		)
+	}
+
+	if stdout.String() != "" {
+		t.Fatalf("unexpected stdout: %q", stdout.String())
+	}
+
+	if !strings.Contains(stderr.String(), "runtime unreachable:") {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }

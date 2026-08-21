@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+const runtimeStatusTimeout = 1 * time.Second
 
 const (
 	runtimeURL = "http://127.0.0.1:8080"
@@ -47,7 +50,11 @@ type modelsResponse struct {
 }
 
 func runtimeStatus(baseURL string, stdout, stderr io.Writer) int {
-	resp, err := http.Get(baseURL + "/health")
+	client := &http.Client{
+		Timeout: runtimeStatusTimeout,
+	}
+
+	resp, err := client.Get(baseURL + "/health")
 	if err != nil {
 		fmt.Fprintf(stderr, "runtime unreachable: %v\n", err)
 		return 1
