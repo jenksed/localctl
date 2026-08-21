@@ -19,7 +19,8 @@ func TestLearnerNextStep(t *testing.T) {
 		t.Fatalf("untested-model next step: %s", got)
 	}
 
-	records := []runObservation{{Model: modelEvidence{ID: "granite"}}}
+	records := []runObservation{{}}
+	records[0].Model.ID = "granite"
 	if got := learnerNextStep(models, records, "granite").Command; got != "localctl gaps granite" {
 		t.Fatalf("tested-model next step: %s", got)
 	}
