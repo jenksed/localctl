@@ -20,21 +20,24 @@ type categoryCharacterization struct {
 }
 
 type modelCharacterization struct {
-	SchemaVersion    int                        `json:"schema_version"`
-	GeneratedAt      time.Time                  `json:"generated_at"`
-	ModelID          string                     `json:"model_id"`
-	ModelName        string                     `json:"model_name"`
-	Runs             int                        `json:"runs"`
-	CanonicalRuns    int                        `json:"canonical_runs"`
-	PrivateRuns      int                        `json:"private_runs"`
-	SchemaVersions   map[int]int                `json:"schema_versions"`
-	Profiles         map[string]int             `json:"profiles"`
-	Experiments      int                        `json:"experiments"`
-	Categories       []categoryCharacterization `json:"categories"`
-	FailureKinds     map[string]int             `json:"failure_kinds"`
-	MedianElapsed    string                     `json:"median_elapsed"`
-	MedianGeneration string                     `json:"median_generation"`
-	LatestRun        time.Time                  `json:"latest_run,omitempty"`
+	SchemaVersion       int                        `json:"schema_version"`
+	GeneratedAt         time.Time                  `json:"generated_at"`
+	ModelID             string                     `json:"model_id"`
+	ModelName           string                     `json:"model_name"`
+	Runs                int                        `json:"runs"`
+	CanonicalRuns       int                        `json:"canonical_runs"`
+	PrivateRuns         int                        `json:"private_runs"`
+	SchemaVersions      map[int]int                `json:"schema_versions"`
+	Profiles            map[string]int             `json:"profiles"`
+	Experiments         int                        `json:"experiments"`
+	Categories          []categoryCharacterization `json:"categories"`
+	FailureKinds        map[string]int             `json:"failure_kinds"`
+	MedianElapsed       string                     `json:"median_elapsed"`
+	MedianGeneration    string                     `json:"median_generation"`
+	RuntimeRSSSamples   int                        `json:"runtime_rss_samples"`
+	MaxRuntimeRSSBytes  int64                      `json:"max_runtime_rss_bytes,omitempty"`
+	MachineMemoryBytes  int64                      `json:"machine_memory_bytes,omitempty"`
+	LatestRun           time.Time                  `json:"latest_run,omitempty"`
 }
 
 func historicalModelRecords(reference string) (string, string, []runObservation, error) {
@@ -112,6 +115,15 @@ func buildCharacterization(reference string) (modelCharacterization, error) {
 		if report.LatestRun.IsZero() || record.StartedAt.After(report.LatestRun) {
 			report.LatestRun = record.StartedAt
 		}
+		if record.Machine.MemoryBytes > report.MachineMemoryBytes {
+			report.MachineMemoryBytes = record.Machine.MemoryBytes
+		}
+		if record.Resources.RuntimeRSSBytes > 0 {
+			report.RuntimeRSSSamples++
+			if record.Resources.RuntimeRSSBytes > report.MaxRuntimeRSSBytes {
+				report.MaxRuntimeRSSBytes = record.Resources.RuntimeRSSBytes
+			}
+		}
 		if record.Result.Status == "succeeded" {
 			elapsed = append(elapsed, record.Result.ElapsedMS)
 			if record.Result.GenerationTokensSec > 0 {
@@ -186,6 +198,10 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "runs:        %d (%d canonical / %d private)\n", report.Runs, report.CanonicalRuns, report.PrivateRuns)
 	fmt.Fprintf(stdout, "experiments: %d\n", report.Experiments)
 	fmt.Fprintf(stdout, "median:      %s · %s\n", report.MedianElapsed, report.MedianGeneration)
+	if report.MaxRuntimeRSSBytes > 0 {
+		fmt.Fprintf(stdout, "runtime RSS: %s max observed across %d samples\n", formatBytes(report.MaxRuntimeRSSBytes), report.RuntimeRSSSamples)
+		fmt.Fprintln(stdout, "             point-in-time process RSS only; not peak or total Metal/unified-memory use")
+	}
 	if !report.LatestRun.IsZero() {
 		fmt.Fprintf(stdout, "latest:      %s\n", report.LatestRun.Format(time.RFC3339))
 	}
