@@ -15,15 +15,16 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type machineFingerprintRecord struct {
-	OS          string `json:"os"`
+	OS           string `json:"os"`
 	Architecture string `json:"architecture"`
-	Hostname    string `json:"hostname,omitempty"`
-	Chip        string `json:"chip,omitempty"`
-	MemoryBytes int64  `json:"memory_bytes,omitempty"`
+	Hostname     string `json:"hostname,omitempty"`
+	Chip         string `json:"chip,omitempty"`
+	MemoryBytes  int64  `json:"memory_bytes,omitempty"`
 }
 
 type localctlFingerprintRecord struct {
@@ -54,35 +55,44 @@ type artifactDigestCache struct {
 	SHA256     string    `json:"sha256"`
 }
 
-var quantPattern = regexp.MustCompile(`(?i)(IQ[0-9]+_[A-Z0-9_]+|Q[0-9]+(?:_[A-Z0-9]+)+|Q[0-9]+_[0-9]+)`) 
+var quantPattern = regexp.MustCompile(`(?i)(IQ[0-9]+_[A-Z0-9_]+|Q[0-9]+(?:_[A-Z0-9]+)+|Q[0-9]+_[0-9]+)`)
+var machineOnce sync.Once
+var machineCached machineFingerprintRecord
+var runtimeVersionMu sync.Mutex
+var runtimeVersions = map[string]string{}
+var artifactDigestMu sync.Mutex
+var artifactDigests = map[string]string{}
 
 func machineFingerprint() machineFingerprintRecord {
-	record := machineFingerprintRecord{OS: runtime.GOOS, Architecture: runtime.GOARCH}
-	record.Hostname, _ = os.Hostname()
-	if runtime.GOOS == "darwin" {
-		record.Chip = commandOutput("/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string")
-		if record.Chip == "" {
-			record.Chip = commandOutput("/usr/sbin/sysctl", "-n", "hw.model")
-		}
-		if value := commandOutput("/usr/sbin/sysctl", "-n", "hw.memsize"); value != "" {
-			record.MemoryBytes, _ = strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-		}
-	} else if runtime.GOOS == "linux" {
-		if file, err := os.Open("/proc/meminfo"); err == nil {
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				fields := strings.Fields(scanner.Text())
-				if len(fields) >= 2 && fields[0] == "MemTotal:" {
-					kb, _ := strconv.ParseInt(fields[1], 10, 64)
-					record.MemoryBytes = kb * 1024
-					break
-				}
+	machineOnce.Do(func() {
+		record := machineFingerprintRecord{OS: runtime.GOOS, Architecture: runtime.GOARCH}
+		record.Hostname, _ = os.Hostname()
+		if runtime.GOOS == "darwin" {
+			record.Chip = commandOutput("/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string")
+			if record.Chip == "" {
+				record.Chip = commandOutput("/usr/sbin/sysctl", "-n", "hw.model")
 			}
-			_ = file.Close()
+			if value := commandOutput("/usr/sbin/sysctl", "-n", "hw.memsize"); value != "" {
+				record.MemoryBytes, _ = strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			}
+		} else if runtime.GOOS == "linux" {
+			if file, err := os.Open("/proc/meminfo"); err == nil {
+				scanner := bufio.NewScanner(file)
+				for scanner.Scan() {
+					fields := strings.Fields(scanner.Text())
+					if len(fields) >= 2 && fields[0] == "MemTotal:" {
+						kb, _ := strconv.ParseInt(fields[1], 10, 64)
+						record.MemoryBytes = kb * 1024
+						break
+					}
+				}
+				_ = file.Close()
+			}
+			record.Chip = commandOutput("uname", "-m")
 		}
-		record.Chip = commandOutput("uname", "-m")
-	}
-	return record
+		machineCached = record
+	})
+	return machineCached
 }
 
 func localctlFingerprint() localctlFingerprintRecord {
@@ -114,7 +124,16 @@ func runtimeFingerprint(model modelArtifact) runtimeFingerprintRecord {
 	if info, statErr := os.Stat(state.Executable); statErr == nil {
 		record.ExecutableKey = textSHA256(fmt.Sprintf("%s\n%d\n%d", state.Executable, info.Size(), info.ModTime().UnixNano()))
 	}
-	record.Version = firstLine(commandOutput(state.Executable, "--version"))
+	runtimeVersionMu.Lock()
+	version, ok := runtimeVersions[record.ExecutableKey]
+	runtimeVersionMu.Unlock()
+	if !ok {
+		version = firstLine(commandOutput(state.Executable, "--version"))
+		runtimeVersionMu.Lock()
+		runtimeVersions[record.ExecutableKey] = version
+		runtimeVersionMu.Unlock()
+	}
+	record.Version = version
 	return record
 }
 
@@ -134,8 +153,7 @@ func firstLine(value string) string {
 }
 
 func quantizationFromName(name string) string {
-	match := quantPattern.FindString(strings.ToUpper(name))
-	return match
+	return quantPattern.FindString(strings.ToUpper(name))
 }
 
 func artifactIdentity(model modelArtifact) artifactIdentityRecord {
@@ -156,15 +174,24 @@ func cachedArtifactSHA256(model modelArtifact) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	key := textSHA256(fmt.Sprintf("%s\n%d\n%d", model.Path, info.Size(), info.ModTime().UnixNano()))
+	artifactDigestMu.Lock()
+	if digest, ok := artifactDigests[key]; ok {
+		artifactDigestMu.Unlock()
+		return digest, nil
+	}
+	artifactDigestMu.Unlock()
 	root, err := artifactCacheRoot()
 	if err != nil {
 		return "", err
 	}
-	key := textSHA256(fmt.Sprintf("%s\n%d\n%d", model.Path, info.Size(), info.ModTime().UnixNano()))
 	path := filepath.Join(root, key+".json")
 	if data, readErr := os.ReadFile(path); readErr == nil {
 		var cached artifactDigestCache
 		if json.Unmarshal(data, &cached) == nil && cached.Path == model.Path && cached.Size == info.Size() && cached.ModifiedAt.Equal(info.ModTime()) {
+			artifactDigestMu.Lock()
+			artifactDigests[key] = cached.SHA256
+			artifactDigestMu.Unlock()
 			return cached.SHA256, nil
 		}
 	}
@@ -181,6 +208,9 @@ func cachedArtifactSHA256(model modelArtifact) (string, error) {
 		return "", err
 	}
 	digest := hex.EncodeToString(hash.Sum(nil))
+	artifactDigestMu.Lock()
+	artifactDigests[key] = digest
+	artifactDigestMu.Unlock()
 	cache := artifactDigestCache{Path: model.Path, Size: info.Size(), ModifiedAt: info.ModTime(), SHA256: digest}
 	if err := os.MkdirAll(root, 0700); err == nil {
 		if data, marshalErr := json.MarshalIndent(cache, "", "  "); marshalErr == nil {
