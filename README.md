@@ -1,1098 +1,1391 @@
 # localctl
 
-`localctl` is a hands-on systems project for understanding, measuring, and eventually operating local LLM inference for real software work.
+`localctl` is a small Go CLI for learning and exploring the systems boundary around useful local LLMs.
 
-The immediate implementation is intentionally small:
+It is being built incrementally by hand so the implementation remains understandable from the operating-system boundary upward:
+
+```text
+Go
+HTTP
+OS processes
+llama-server
+llama.cpp
+GGUF
+Metal / Apple Silicon
+runtime state
+failure behavior
+resource behavior
+local inference
+```
+
+The current implementation is intentionally small.
+
+The objective is not merely to create a convenient wrapper around `llama.cpp`.
+
+The broader objective is to understand what a genuinely useful machine-facing operating layer for local LLMs needs to observe, control, measure, and expose — especially for software-development and other practical local-model workloads.
+
+---
+
+## Current architecture
 
 ```text
 shell
-  ↓
-Go executable (`localctl`)
-  ↓
-HTTP
-  ↓
-`llama-server`
-  ↓
-`llama.cpp`
-  ↓
-Metal / Apple Silicon
-  ↓
-GGUF model
+  |
+  v
+localctl
+Go OS process
+  |
+  | HTTP
+  v
+llama-server
+separate OS process
+  |
+  +-- llama.cpp runtime machinery
+  |
+  +-- loaded model/runtime state
+          |
+          v
+      GGUF-backed model
+          |
+          v
+      Metal / Apple Silicon
 ```
 
-The long-term goal is larger: build a local-model operating layer that can discover what models and configurations are actually useful on a machine, preserve the evidence that supports those claims, route bounded work according to demonstrated capability, manage constrained local compute, and escalate work when local inference has not demonstrated that it can do the job reliably.
-
-This repository starts at the bottom of that stack on purpose. It is not an attempt to build the entire control plane in Go.
-
-For the implementation-shaped project map, see [`docs/PSEUDOCODE.md`](docs/PSEUDOCODE.md).
-
-## Project thesis
-
-Local models are already capable of useful software work. The practical problem is that using them well remains operationally messy.
-
-A model may be good at reviewing a diff but poor at planning a multi-file change. Another may be fast and predictable with structured output but weak at tool use. A configuration that works well with one runtime, quantization, context size, or chat template may behave differently under another. A smaller model may be the correct choice for a narrow task because it is fast, fits in memory, and reliably follows the required output contract.
-
-Today the developer usually remembers these distinctions manually.
-
-The system should remember them instead.
-
-The eventual user-facing abstraction should move from:
+Important process boundary:
 
 ```text
-Use model X.
+localctl process
+!=
+llama-server process
 ```
 
-toward:
+`localctl` currently communicates with an already-running `llama-server` over HTTP.
+
+It does not yet start, stop, supervise, or own that process.
+
+`llama.cpp` is not another OS process beneath `llama-server`.
+
+`llama-server` is an executable built from the llama.cpp project, and the inference machinery runs inside that server process.
+
+---
+
+## Project direction
+
+The project began with a deliberately narrow question:
+
+> Can a small Go program correctly observe and communicate with a separately running local inference runtime?
+
+That remains the immediate learning path.
+
+The larger question is:
+
+> What does a useful machine-facing operating layer for local LLMs need to know, control, measure, and expose?
+
+Potential long-term concerns include:
 
 ```text
-I need:
-- capability: diff_review
-- structured output: required
-- latency: under 5 seconds
-- memory: under 6 GB
+runtime discovery
+runtime lifecycle
+model artifact discovery
+artifact identity
+runtime build identity
+runtime configuration
+observed runtime state
+resource behavior
+latency
+time to first token
+throughput
+bounded inference
+failure classification
+capability observations
+task-specific evaluation
+configuration profiles
+evidence capture
+selection inputs
 ```
 
-The system can then choose among configurations that have actually demonstrated the requested property.
+These are directions, not promises that every concern belongs inside LocalCTL.
 
-The project is therefore not primarily a model leaderboard. It is an attempt to construct usable engineering knowledge about local inference.
+One purpose of the project is to discover the correct boundaries before building large abstractions.
 
-## What is being qualified
+---
 
-A model name alone is not enough information.
+## What LocalCTL should not become
 
-The relevant execution identity is closer to:
+The project is not currently trying to build:
+
+```text
+another chat UI
+another coding agent
+another agent framework
+another Ollama
+another LM Studio
+another generic LLM proxy
+another model marketplace
+another opaque "best model" router
+```
+
+The more interesting questions are:
+
+```text
+What actually exists?
+
+What is actually running?
+
+What configuration is actually active?
+
+What did this model/runtime combination actually demonstrate?
+
+What constraints does this machine impose?
+
+What facts should a higher-level system be allowed to rely on?
+```
+
+---
+
+## Model name is not capability identity
+
+A useful local-model configuration is more than a model name.
+
+A meaningful identity is closer to:
 
 ```text
 model
 +
-runtime
+model artifact
++
+artifact digest
 +
 quantization
 +
+runtime
++
+runtime version/build
++
+machine
++
 context configuration
 +
-prompt structure
+offload configuration
 +
-reasoning behavior
+sampling configuration
 +
-sampling
+prompt/system recipe
 +
-available tools
+tool/output contract
 +
-input preparation
-+
-output contract
+task/workload class
 ```
 
-A qualification statement should eventually mean something like:
+There is a major difference between:
 
 ```text
-Capability:
-fast_test_diagnosis
-
-Configuration:
-model: qwen-family-model
-runtime: llama.cpp
-quantization: Q4 variant
-context: 8192
-profile: fast-diagnosis-v2
-
-Evidence:
-20 fixture runs
-18 correct
-20 structurally valid
-median latency: measured value
-
-Machine:
-Apple Silicon host with recorded environment facts
-
-Decision:
-qualified under explicit criteria
+"this model is good at coding"
 ```
 
-That is materially different from saying that a model is "good at coding."
-
-## Why Go
-
-Go is being used here deliberately, not because the final system must be a Go application.
-
-The first phase is a machine-facing CLI and diagnostic tool. That gives the project a legitimate reason to learn and use:
-
-- executable/process behavior
-- CLI design
-- `net/http`
-- `context.Context`
-- timeouts and cancellation
-- `os/exec`
-- signals and process lifecycle
-- files and durable evidence
-- JSON boundaries
-- concurrency
-- resource observation
-- testing around external processes
-- single-binary distribution
-
-The Go component should remain useful after the larger architecture grows.
-
-The current working name is `localctl`.
-
-Early:
+and:
 
 ```text
-localctl
-   ↓
-llama-server
-   ↓
+this particular model artifact
+running under this particular runtime configuration
+on this particular machine
+demonstrated this bounded capability
+within this observed operating envelope
+```
+
+LocalCTL is currently learning how to observe the lower layers required to eventually make the second kind of statement.
+
+---
+
+# Relationship to Invariant
+
+`localctl` is currently an independent personal learning project.
+
+It is not currently an Invariant component.
+
+However, the work is directly relevant to questions that Invariant will eventually need answered.
+
+A possible future conceptual relationship is:
+
+```text
+       machine / local runtime layer
+
+            LocalCTL-like work
+                  |
+       +----------+----------+
+       |          |          |
+    observe    measure    control
+       |          |          |
+       +----------+----------+
+                  |
+                  v
+           evidence / facts
+                  |
+          +-------+-------+
+          |               |
+          v               v
+        Bench          Manifold
+   qualification       selection
+          |               |
+          +-------+-------+
+                  |
+                  v
+                Kiln
+        execution / authority
+```
+
+This is a conceptual separation of responsibilities.
+
+LocalCTL does not currently implement Bench, Manifold, or Kiln.
+
+---
+
+# What examining Manifold taught this project
+
+The existing Invariant Manifold implementation was examined to determine whether LocalCTL should reuse or directly extend it for local-model selection.
+
+The current conclusion is:
+
+> Not yet.
+
+That decision itself produced useful architectural lessons.
+
+---
+
+## Manifold already has a legitimate narrow responsibility
+
+Manifold's responsibility is selection.
+
+Conceptually:
+
+```text
+requirement
++
+candidate profiles
++
+qualification evidence
+        |
+        v
+     Manifold
+        |
+        v
+selection / assignment
+```
+
+Manifold deliberately does not own:
+
+```text
+provider execution
+network access
+process control
+runtime discovery
+runtime supervision
+repository mutation
+qualification
+execution authority
+generic orchestration
+```
+
+That boundary reinforces an important lesson:
+
+```text
+runtime observation
+!=
+qualification
+!=
+selection
+!=
+execution
+!=
+authority
+```
+
+These should not casually collapse into one large AI-management component.
+
+---
+
+## Current Manifold is intentionally simpler than the local-model problem
+
+The current bounded Manifold implementation behaves approximately like:
+
+```text
+Intelligence Requirement
+        +
+Profiles
+        +
+Eligibility Snapshots
+        |
+        v
+validate contracts
+        |
+        v
+filter by role
+        |
+        v
+require current QUALIFIED evidence
+        |
+        v
+deterministic tie-break
+        |
+        v
+Intelligence Assignment
+```
+
+It does not yet perform general-purpose comparison based on:
+
+```text
+tokens/sec
+memory requirements
+context size
+task-specific capability
+local vs remote
+latency
+hardware fit
+runtime availability
+cost
+```
+
+Its current deterministic selection rule is deliberately much narrower.
+
+That is appropriate for the Invariant milestone it was designed to prove.
+
+It also means extending it for this project would immediately turn LocalCTL work into real Manifold contract and architecture development.
+
+That would distract from the current learning objective.
+
+---
+
+## Current Manifold contracts are also intentionally specific
+
+The current Invariant profile contracts were created for the bounded system being proven inside Invariant.
+
+They are not yet a universal vocabulary for arbitrary combinations such as:
+
+```text
+Granite GGUF
+Qwen GGUF
+different quantizations
 llama.cpp
+Ollama
+LM Studio
+different context sizes
+different Apple Silicon machines
+different memory envelopes
+different local performance characteristics
 ```
 
-Later:
+Trying to force those concepts into Manifold now would require genuine evolution of:
 
 ```text
-localctl
-   ↓
-control plane
-   ↓
-runtime adapter
-   ↓
-llama.cpp
+canonical schemas
+profile identity
+requirements
+qualification artifacts
+selection semantics
+fixtures
+tests
+downstream consumers
 ```
 
-The direct-runtime path can remain useful for diagnostics even after a control plane exists.
+That may eventually be worthwhile.
 
-## Why `llama.cpp` first
+It is not required to continue learning about local inference.
 
-The first runtime is `llama.cpp`, exposed through `llama-server` over HTTP.
+---
 
-We are intentionally not starting with a managed desktop application because the point of this phase is to understand more of the runtime boundary directly: model files, server startup, readiness, configuration, context, runtime flags, latency, process lifecycle, structured output, and eventually concurrency/resource behavior.
+# Manifold is therefore a reference, not a dependency
 
-We are also intentionally not starting by embedding the native `llama.cpp` API through cgo.
+For this project, Manifold is currently useful as an architectural north star.
 
-The first boundary is:
+LocalCTL can independently discover what facts a future selector might actually need.
+
+For example, a future observed local profile might conceptually contain facts such as:
 
 ```text
-Go
- ↓ HTTP
-llama-server
- ↓
-llama.cpp
+candidate:
+  granite-local
+
+runtime:
+  llama.cpp
+
+artifact:
+  granite-4.1-8b-Q4_K_S.gguf
+
+context:
+  8192
+
+memory:
+  observed value
+
+throughput:
+  observed value
+
+capabilities:
+  observed code explanation
+  observed structured output
+  observed small edit behavior
 ```
 
-not:
+Another local configuration could produce another evidence set.
+
+Only when multiple plausible candidates exist does a genuine selection problem appear.
+
+That suggests the progression:
 
 ```text
-Go
- ↓ cgo
-llama.cpp C/C++ API
+one runtime
+    |
+    v
+understand runtime truth
+
+multiple configurations
+    |
+    v
+understand comparable evidence
+
+multiple viable candidates
+    |
+    v
+discover what selection inputs matter
+
+small selection experiment
+    |
+    v
+learn which concepts generalize
+
+generalizable lessons
+    |
+    v
+potential future Manifold evolution
 ```
 
-Native integration is a future experiment only if evidence shows that the server boundary is materially limiting the system.
+This allows implementation experience to inform architecture instead of forcing architecture onto experiments prematurely.
 
-Current upstream `llama-server` exposes a lightweight HTTP server with OpenAI-compatible routes and native monitoring/health surfaces. The exact API behavior used by `localctl` must still be verified against the installed runtime version rather than assumed forever from documentation.
+---
 
-Useful upstream references:
+# Selection is not automatically an AI problem
 
-- https://github.com/ggml-org/llama.cpp
-- https://github.com/ggml-org/llama.cpp/tree/master/tools/server
+Another useful lesson from Manifold is that candidate selection should begin deterministically.
 
-## The mental model
-
-The first implementation should be understood as a chain of responsibility.
-
-### Shell
-
-The shell:
-
-- resolves the executable path
-- provides command-line arguments and environment variables
-- creates the `localctl` process
-- observes its exit status
-- may redirect stdin/stdout/stderr
-
-The shell does not own inference.
-
-### `localctl`
-
-The Go process initially owns:
-
-- CLI argument interpretation
-- configuration resolution
-- HTTP requests to `llama-server`
-- request deadlines/cancellation
-- parsing runtime responses
-- local validation of response contracts
-- local evidence capture
-- eventually child-process lifecycle when we deliberately add it
-
-It does **not** initially own:
-
-- token generation
-- model loading internals
-- KV-cache implementation
-- Metal kernels
-- tensor execution
-- arbitrary authority to execute model-generated commands
-
-### `llama-server`
-
-`llama-server` owns the serving process and the runtime-facing HTTP boundary. Depending on how it is launched, it owns configuration such as the model path, context, listening address, runtime options, batching/parallel behavior, and other server/runtime flags.
-
-A healthy HTTP process is not automatically proof that the loaded model is useful for a requested task.
-
-### `llama.cpp`
-
-`llama.cpp` owns the inference machinery beneath the server: loading supported model data, tokenization/runtime execution, sampling, compute/backend interaction, cache behavior, and related inference mechanisms.
-
-### Metal / hardware
-
-On Apple Silicon, Metal is part of the hardware acceleration path used by the runtime. It is below the application boundary we are initially implementing.
-
-### GGUF model
-
-A GGUF file is an artifact consumed by the runtime. Its presence on disk proves only that a file exists.
+For example:
 
 ```text
-file exists
-≠
-valid model artifact
-≠
-loadable by this runtime
-≠
-responsive
-≠
-contract compliant
-≠
-capable of the task
-≠
-operationally acceptable
+Candidate A
+context = 4096
+memory = 5 GB
+
+Candidate B
+context = 16384
+memory = 9 GB
+
+Task requirement
+context >= 8192
+memory budget <= 8 GB
 ```
 
-That distinction is foundational to the project.
-
-## Core engineering rules
-
-### Installed is not qualified
-
-Never treat discovery as proof of capability.
-
-The intended progression is:
+The deterministic result is:
 
 ```text
-present
-→ loadable
-→ ready
-→ responsive
-→ contract-compliant
-→ task-capable
-→ operationally acceptable
-→ qualified under explicit criteria
+A rejected:
+context requirement not satisfied
+
+B rejected:
+memory constraint not satisfied
+
+result:
+NO ELIGIBLE CANDIDATE
 ```
 
-Each arrow requires evidence.
+No model is required to make that decision.
 
-### Model output is untrusted input
-
-A model response is data, not authority.
-
-A model saying:
+A useful future selection hierarchy might look like:
 
 ```text
-I fixed the bug.
+hard constraints
+    |
+    v
+deterministic eligibility
+    |
+    v
+qualification evidence
+    |
+    v
+measured comparison
+    |
+    v
+explicit preferences
+    |
+    v
+bounded intelligence only if ambiguity remains
 ```
 
-proves nothing about the repository.
+A useful principle is:
 
-Future coding tasks may produce patches, commands, diagnoses, or tool calls, but the system must keep proposal separate from authority and verification.
+> Use intelligence only where deterministic evidence and policy are insufficient.
 
-### Evidence and qualification are different
+---
 
-A measurement is a fact about an observed run.
+# How LocalCTL can inform Manifold later
 
-Example:
+Local-model experiments can help answer architectural questions empirically.
+
+Examples include:
 
 ```text
-18 of 20 fixture runs satisfied the required property.
+What should a candidate profile actually contain?
+
+Which properties are hard constraints?
+
+Which measurements are stable enough to select on?
+
+What constitutes model/runtime identity?
+
+How should machine-specific capability be represented?
+
+How stale can performance evidence become?
+
+Is context capacity runtime state, qualification evidence, or both?
+
+How should locality be represented?
+
+How should memory pressure affect eligibility?
+
+How should task classes be represented?
+
+When is deterministic selection insufficient?
+
+What evidence should accompany a selection explanation?
 ```
 
-A qualification decision is a judgment based on explicit criteria.
-
-Example:
+Rather than:
 
 ```text
-This configuration is qualified for fast_test_diagnosis.
+design Manifold first
+        |
+        v
+force experiments into the design
 ```
 
-Do not collapse the two.
-
-### Preserve raw evidence
-
-Do not normalize away useful facts too early.
-
-Historical evidence should retain enough information to answer later questions such as:
-
-- What exact runtime produced this result?
-- Which model file and profile were used?
-- What input was supplied?
-- What raw output came back?
-- What parser or validator interpreted it?
-- What machine/environment facts matter?
-- Was the run cold or warm?
-- What failed?
-
-Derived summaries can be rebuilt. Lost raw evidence cannot.
-
-### Routing should initially be boring
-
-The eventual system may choose among configurations, but initial routing should use explicit deterministic rules over measured evidence.
-
-Do not introduce another LLM whose job is to guess which LLM should be used.
-
-### Capability is not authority
-
-A model may be capable of producing shell commands, patches, or tool calls. That does not authorize execution.
-
-Early `localctl` should not casually acquire authority to mutate repositories or execute arbitrary model-generated commands.
-
-### Observe before controlling
-
-For resource behavior, concurrency, process lifecycle, model switching, and scheduling:
+the preferred learning path is:
 
 ```text
-observe
-→ measure
-→ model
-→ control
+real experiments
+      |
+      v
+observations
+      |
+      v
+real selection problems emerge
+      |
+      v
+small deterministic experiments
+      |
+      v
+generalizable lessons
+      |
+      v
+future Manifold evolution
 ```
 
-Do not build a scheduler because one may eventually be useful.
+This keeps LocalCTL useful on its own while allowing it to improve the mental model for a future Manifold.
 
-## Learning and development method
+---
 
-This repository is intentionally developed as a conversational learning project rather than a code-generation exercise.
+# Possible future runtime-layer relationship to Invariant
 
-The normal cycle is:
+It is possible that some machine-facing runtime work developed here eventually becomes an Invariant component or sibling open-source project.
+
+A bounded responsibility could eventually include:
 
 ```text
-1. Establish the mental model.
-2. Identify one property we need.
-3. Learn only the Go/runtime concepts required for it.
-4. Predict behavior where useful.
-5. Implement a small piece by hand.
-6. Run a concrete validation command.
-7. Inspect the observed result.
-8. Debug discrepancies before proceeding.
-9. Record what is proven and what remains unproven.
-10. Choose the smallest next experiment.
+discover local runtimes
+discover model artifacts
+start and stop runtime processes
+observe actual runtime state
+apply runtime profiles
+measure resource behavior
+perform bounded inference probes
+capture raw evidence
+expose normalized runtime capabilities
 ```
 
-The project should resist two failure modes:
-
-1. allowing an AI coding agent to generate the entire repository before the operator understands it;
-2. designing future control-plane abstractions before runtime evidence gives them a reason to exist.
-
-## Scope
-
-### In scope for the Go phase
-
-- a real Go CLI
-- direct interaction with `llama-server`
-- explicit configuration
-- runtime health/readiness inspection
-- runtime/model metadata inspection
-- bounded inference requests
-- structured output validation
-- evidence capture
-- repeatable fixture execution
-- configuration profiles
-- repeated measurements
-- explicit qualification decisions
-- resource observation
-- controlled concurrency experiments
-- deterministic capability selection
-- a clean language-neutral boundary for a future control plane
-
-### Explicitly out of scope at the beginning
-
-- building another editor
-- building another Claude Code/OpenCode-style harness
-- distributed scheduling
-- frontier-provider orchestration
-- autonomous shell execution
-- arbitrary repository mutation by models
-- cgo/native integration
-- a plugin framework
-- premature multi-runtime abstraction
-- a database before durable evidence requires one
-- an LLM-based router
-- pretending synthetic benchmarks prove real coding capability
-
-## Milestone roadmap
-
-The milestone numbers are directional. Reality is allowed to change the plan.
-
-### M0 — Smallest real Go executable
-
-Goal: understand the executable before wrapping any inference runtime.
-
-Learn:
-
-- Go module
-- package
-- `package main`
-- `func main()`
-- imports
-- `os.Args`
-- `go run`
-- `go build`
-- `go test`
-- exit status
-
-Candidate behavior:
-
-```bash
-localctl version
-```
-
-Must be understood before proceeding:
+That component should still not absorb responsibilities belonging to:
 
 ```text
-source
-→ compiler
-→ executable
-→ process
-→ exit status
+Bench
+Manifold
+Kiln
 ```
 
-### M1 — Manual `llama-server`
+No decision has been made that LocalCTL itself must become that component.
 
-Goal: understand the runtime before hiding it behind Go.
+The current project is allowed to remain a learning implementation even if concepts later graduate elsewhere.
 
-Manually establish:
+---
 
-- where `llama-server` comes from
-- where a GGUF model lives
-- how the server is started
-- which configuration is passed via arguments
-- which port it listens on
-- what loading/readiness looks like
-- how it exits
+# Current Go structure
 
-No Go process management yet.
-
-### M2 — Runtime probe
-
-Candidate command:
-
-```bash
-localctl runtime status
-```
-
-The command should distinguish at least:
-
-- cannot connect
-- HTTP reachable
-- loading/not ready
-- ready
-- unexpected response
-- timeout/cancellation
-
-Current upstream `llama-server` documents `GET /health` (and `/v1/health`) with `503` while loading and `200` when ready. That behavior should be verified against the actual installed build before becoming an assumed contract.
-
-### M3 — Runtime/model inspection
-
-Inspect actual API responses before inventing an internal model schema.
-
-Questions:
-
-- What model identity does the server expose?
-- Which fields are runtime-specific?
-- Which facts should be preserved raw?
-- What belongs in transport structs versus internal structures?
-
-Current upstream also exposes model-listing routes such as `/v1/models`; installed behavior remains the authority for our implementation.
-
-### M4 — First bounded inference
-
-Send the smallest useful request possible.
-
-Example property:
+The implementation is intentionally organized so source structure mirrors conceptual boundaries.
 
 ```text
-Return exactly: PONG
+main.go
+  process entry and exit
+
+cli.go
+  CLI command dispatch
+
+runtime.go
+  llama-server HTTP behavior and protocol structures
+
+cli_test.go
+  CLI behavior tests
+
+runtime_test.go
+  runtime HTTP and failure-behavior tests
 ```
 
-Capture:
+Only `main()` owns actual process termination:
 
-- request
-- runtime/model identity
-- start/end timestamps
-- duration
-- raw response
-- transport error
-- instruction-following result
-
-Distinguish:
-
-```text
-transport success
-≠
-inference success
-≠
-requested property satisfied
-```
-
-### M5 — Process ownership
-
-Only after manual operation is understood should Go start `llama-server`.
-
-Learn:
-
-- `os/exec`
-- child-process ownership
-- stdout/stderr
-- readiness
-- PIDs
-- signals
-- cancellation
-- startup failure
-- shutdown semantics
-
-Explicit decisions are required for:
-
-- attached versus detached lifetime
-- whether server lifetime may exceed CLI lifetime
-- startup timeout
-- readiness proof
-- crash handling
-- stale PID/state behavior
-
-### M6 — Structured output contract
-
-Introduce machine-verifiable output.
-
-Example:
-
-```json
-{
-  "classification": "bug",
-  "confidence": 0.8
+```go
+func main() {
+	os.Exit(run(os.Args, os.Stdout, os.Stderr))
 }
 ```
 
-Exercise:
+Application behavior returns exit codes instead of calling `os.Exit()` throughout the command implementation.
 
-- valid JSON
-- malformed JSON
-- markdown-wrapped JSON
-- missing fields
-- wrong types
-- extra chatter
-- empty content
-
-The system must distinguish transport success from contract success.
-
-### M7 — Evidence records
-
-Begin durable evidence capture.
-
-Candidate facts:
-
-- run ID
-- timestamp
-- `localctl` version
-- machine/environment identity
-- runtime version
-- model/GGUF identity
-- runtime/profile configuration
-- task/fixture identity
-- input
-- raw output
-- parsed output
-- duration
-- contract result
-- validation result
-- error
-
-Storage is intentionally undecided until requirements become real.
-
-Possible progression:
+This allows:
 
 ```text
-individual JSON / JSONL
-→ SQLite only when querying/transactional needs justify it
+production
+  os.Stdout
+  os.Stderr
+
+tests
+  bytes.Buffer
 ```
 
-### M8 — Repeatable fixtures
+and permits deferred cleanup to execute normally.
 
-Create small task fixtures representing useful software work.
+---
 
-Candidate categories:
+# Requirements
 
-- structured extraction
-- error classification
-- test-failure diagnosis
-- small code reasoning
-- diff review
-- tool selection
+Current development environment:
 
-A fixture must identify the property it tests.
+- macOS / Apple Silicon
+- Go 1.26.5
+- `llama.cpp` / `llama-server`
+- compatible GGUF model
 
-Avoid:
+No third-party Go dependencies are currently used.
+
+---
+
+# Build
+
+```bash
+go build
+```
+
+This creates:
 
 ```text
-produce a good answer
+./localctl
 ```
 
-Prefer:
+The generated executable is ignored by Git.
+
+---
+
+# Commands
+
+## Version
+
+```bash
+./localctl version
+```
+
+Current output:
 
 ```text
-response must identify symbol X
-response must satisfy schema Y
-response must choose one allowed class
-response must identify the demonstrated failing boundary
+localctl dev
 ```
 
-### M9 — Repeated measurement
+---
 
-Run the same configuration enough times to measure behavior rather than remember anecdotes.
+## Runtime status
 
-Potential measurements:
+```bash
+./localctl runtime status
+```
 
-- success count
-- failure count
-- contract compliance
-- latency distribution
-- runtime errors
-- variance
-
-### M10 — Profiles
-
-Represent reusable inference configurations without rewriting history.
-
-A profile may eventually include observed/controlled settings such as:
-
-- model/GGUF
-- context
-- runtime flags
-- sampling
-- chat template behavior
-- thread/backend settings where meaningful
-
-Evidence must retain the profile/version that actually produced it.
-
-### M11 — Qualification
-
-Introduce explicit qualification criteria.
-
-A configuration can be qualified for one capability and rejected for another.
-
-Avoid global statements such as "model X is qualified for coding."
-
-### M12 — Resource observation
-
-Measure before scheduling:
-
-- cold startup
-- warm inference
-- model load/unload time
-- memory pressure
-- model switching cost
-- quantization effects
-- context effects
-
-### M13 — Controlled Go concurrency
-
-Only now deliberately explore:
-
-- goroutines
-- channels
-- `sync.WaitGroup`
-- mutexes
-- semaphores
-- cancellation
-- bounded concurrency
-- backpressure
-- race detection
-
-Experiments should be tied to a real constrained resource.
-
-Example:
+LocalCTL sends:
 
 ```text
-10 callers
-1 runtime
-1 loaded model
-different deadlines
-one cancellation
-one runtime failure
+GET http://127.0.0.1:8080/health
 ```
 
-Use `go test -race ./...` where applicable.
-
-### M14 — Deterministic capability selection
-
-Once evidence exists, implement a simple explainable selector.
-
-Example request:
+A healthy running `llama-server` produces:
 
 ```text
-capability: diff_review
-latency ceiling: 5s
-memory ceiling: 6 GB
-structured contract: required
+runtime: 200 OK
 ```
 
-The selector must be able to explain why candidate A beat candidate B using explicit rules and recorded evidence.
+Runtime status has an explicit one-second HTTP timeout.
 
-### M15 — Language-neutral control-plane contract
+A controlled server that accepts the request but does not answer within that deadline causes LocalCTL to return non-zero rather than waiting indefinitely.
 
-Only after the direct-runtime system teaches us what is actually needed should we specify the external service contract for a larger control plane.
+Therefore:
 
-Possible concepts:
+```text
+reachable != responsive
+```
 
-- runtime status
-- models
-- execute
-- profiles
-- capabilities
-- qualification
-- evidence
-- system status
+A successful health request currently proves:
 
-The contract must not expose Go- or Elixir-specific implementation concepts.
+> Something reachable at the configured address returned a successful `/health` response within the bounded status timeout.
 
-### M16 — Control-plane handoff
+It does not prove:
 
-The likely future architecture becomes:
+```text
+runtime identity
+expected llama.cpp build
+expected model identity
+complete runtime configuration
+qualification for a workload
+```
+
+---
+
+## Runtime inspection
+
+```bash
+./localctl runtime inspect
+```
+
+LocalCTL currently queries:
+
+```text
+GET http://127.0.0.1:8080/v1/models
+```
+
+It decodes the response into Go structures and reports observed model/runtime information.
+
+An observed development response included:
+
+```text
+runtime: llamacpp
+model: granite-4.1-8b-Q4_K_S.gguf
+context: 2048
+training context: 131072
+parameters: 8791592960
+size: 5087248384
+```
+
+This provides stronger evidence than health alone.
+
+It still does not establish complete runtime identity or workload qualification.
+
+---
+
+## Inference
+
+```bash
+./localctl runtime infer "What is 2 + 2? Answer briefly."
+```
+
+LocalCTL currently:
+
+1. accepts the prompt from the CLI
+2. constructs a Go request structure
+3. encodes it as JSON
+4. creates an HTTP POST
+5. sends it to `/v1/chat/completions`
+6. checks transport success
+7. checks HTTP status
+8. decodes the JSON response
+9. verifies at least one completion choice exists
+10. prints the assistant content
+
+Example observed output:
+
+```text
+2 + 2 = 4.
+```
+
+---
+
+# Running llama-server
+
+The current development experiment uses:
+
+```bash
+MODEL="$HOME/.lmstudio/models/ibm-granite/granite-4.1-8b-GGUF/granite-4.1-8b-Q4_K_S.gguf"
+
+llama-server \
+  --model "$MODEL" \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --ctx-size 2048
+```
+
+The model path is environment-specific.
+
+The corresponding model ID is currently hard-coded:
+
+```text
+granite-4.1-8b-Q4_K_S.gguf
+```
+
+This is temporary development state rather than a finished configuration design.
+
+---
+
+# What has been demonstrated
+
+The implementation has been exercised against both a real `llama-server` and controlled HTTP test servers.
+
+Demonstrated behavior includes:
+
+```text
+Go module creation
+native arm64 Mach-O executable
+CLI command dispatch
+CLI subcommand dispatch
+stdout/stderr separation
+exit-code behavior
+HTTP communication with a separate OS process
+runtime health observation
+runtime model inspection
+connection-refused handling
+HTTP non-2xx handling
+JSON request encoding
+JSON response decoding
+malformed JSON rejection
+empty inference-result rejection
+real GGUF-backed inference
+explicit status timeout behavior
+HTTP request cancellation
+automated CLI tests
+automated runtime HTTP tests
+```
+
+A real end-to-end contract request produced:
+
+```text
+LOCALCTL_INFERENCE_OK
+```
+
+through:
+
+```text
+shell
+  |
+  v
+localctl
+  |
+  | HTTP POST
+  v
+llama-server
+  |
+  v
+llama.cpp
+  |
+  v
+Granite GGUF model
+  |
+  v
+generated tokens
+  |
+  | HTTP JSON response
+  v
+localctl
+  |
+  v
+stdout
+```
+
+A normal inference request also produced:
+
+```text
+2 + 2 = 4.
+```
+
+---
+
+# Failure boundaries exercised
+
+## Transport failure
+
+When no process is listening on port `8080`:
+
+```text
+connection refused
+```
+
+LocalCTL exits non-zero.
+
+No HTTP response existed.
+
+---
+
+## HTTP failure
+
+A controlled server returning:
+
+```text
+503 Service Unavailable
+```
+
+is reachable over HTTP, but LocalCTL still exits non-zero.
+
+```text
+transport success != HTTP success
+```
+
+---
+
+## Protocol failure
+
+A controlled server returning HTTP `200` with malformed JSON is rejected.
+
+```text
+HTTP success != valid protocol response
+```
+
+---
+
+## Missing inference result
+
+A controlled server returning valid JSON with:
+
+```json
+{
+  "choices": []
+}
+```
+
+is rejected.
+
+```text
+valid JSON != valid inference result
+```
+
+---
+
+## Slow runtime
+
+A controlled server was configured to accept the request and wait for two seconds.
+
+Before an explicit timeout policy:
+
+```text
+server accepts request
+        |
+        v
+waits approximately 2 seconds
+        |
+        v
+200 OK
+```
+
+LocalCTL simply waited.
+
+After introducing the status timeout:
+
+```text
+server accepts request
+        |
+        v
+server stalls
+        |
+        v
+1-second client timeout
+        |
+        v
+request cancelled
+        |
+        v
+LocalCTL returns exit 1
+```
+
+The controlled HTTP server observes cancellation through:
+
+```go
+r.Context().Done()
+```
+
+This establishes:
+
+```text
+unreachable
+!=
+reachable but stalled
+```
+
+The current error wording still reports both cases beneath the broad `runtime unreachable` failure class.
+
+That classification may deserve refinement later.
+
+---
+
+# Automated tests
+
+The project now has an automated Go test suite using only the standard library.
+
+Current coverage includes:
+
+```text
+version behavior
+missing command
+unknown command
+missing runtime subcommand
+unknown runtime subcommand
+missing inference prompt
+
+healthy runtime status
+unhealthy HTTP response
+unreachable runtime
+slow/stalled runtime
+
+successful inference
+inference request contract
+inference HTTP failure
+malformed inference JSON
+missing inference choices
+
+successful runtime inspection
+malformed inspection JSON
+empty model list
+```
+
+Run:
+
+```bash
+go test -v ./...
+```
+
+The tests use Go standard-library facilities including:
+
+```text
+testing
+net/http/httptest
+bytes.Buffer
+encoding/json
+strings
+time
+```
+
+`httptest.NewServer()` creates a real temporary HTTP listener.
+
+It does not create another OS process.
+
+The controlled server normally executes inside the Go test process.
+
+Therefore:
+
+```text
+real HTTP boundary
+!=
+separate OS process boundary
+```
+
+---
+
+# Important distinctions
+
+The project deliberately preserves distinctions such as:
+
+```text
+installed != running
+
+running != ready
+
+ready != reachable
+
+reachable != responsive
+
+responsive != inference succeeded
+
+inference succeeded != requested contract followed
+
+contract followed once != reliable
+
+artifact exists != model loaded
+
+configuration requested != runtime state observed
+
+HTTP success != protocol success
+
+protocol success != semantic result
+
+task success != operationally acceptable
+
+evidence != qualification
+
+qualification != selection
+
+selection != execution
+
+selection != authority
+
+capability != authority
+
+passing tests != every intended system property proven
+```
+
+These distinctions determine what claims the system is actually justified in making.
+
+---
+
+# Evidence discipline
+
+Useful evidence categories for this project are:
+
+```text
+OBSERVED
+INFERRED
+ASSUMED
+EXPECTED
+UNKNOWN
+```
+
+For example:
+
+```text
+OBSERVED:
+GET /health returned 200 OK.
+
+INFERRED:
+the server considers itself healthy.
+
+UNKNOWN:
+whether it is the exact llama.cpp build we intended.
+```
+
+Or:
+
+```text
+OBSERVED:
+the expected inference text was returned once.
+
+SUPPORTED:
+this execution path can produce the requested result.
+
+NOT PROVEN:
+the configuration is reliable or qualified for a coding workload.
+```
+
+The project prefers collecting the evidence required for the actual property rather than promoting a proxy into a stronger claim.
+
+---
+
+# Current limitations
+
+The implementation remains intentionally primitive.
+
+Current limitations include:
+
+- server URL is hard-coded
+- model identity is hard-coded
+- prompts are expected as a single quoted CLI argument
+- complete runtime identity is not verified
+- expected llama.cpp build identity is not verified
+- model artifacts are not discovered automatically
+- runtime configuration is only partially observed
+- status has a timeout policy, but inference timeout/cancellation policy is not yet deliberately designed
+- runtime inspection timeout behavior is not yet deliberately designed
+- runtime lifecycle management does not exist
+- persistent configuration does not exist
+- resource measurement does not exist
+- capability evaluation does not exist
+- model/configuration qualification does not exist
+- candidate selection does not exist
+
+These are boundaries of the current implementation.
+
+They are not automatically the next features to build.
+
+---
+
+# Current learning checkpoint
+
+The demonstrated inference path is:
+
+```text
+CLI arguments
+  |
+  v
+Go command dispatch
+  |
+  v
+Go structs
+  |
+  v
+JSON encoding
+  |
+  v
+HTTP request
+  |
+  v
+HTTP transport
+  |
+  v
+llama-server
+  |
+  v
+llama.cpp inference
+  |
+  v
+HTTP response
+  |
+  v
+JSON decoding
+  |
+  v
+Go response structs
+  |
+  v
+assistant content
+  |
+  v
+stdout
+```
+
+The status path additionally demonstrates bounded waiting:
+
+```text
+HTTP request
+  |
+  v
+server stalls
+  |
+  v
+1-second client timeout
+  |
+  v
+request cancelled
+  |
+  v
+LocalCTL returns control
+```
+
+---
+
+# Next engineering direction
+
+The next useful systems boundary is runtime lifecycle.
+
+Today:
+
+```text
+shell
+  |
+  +-- manually starts llama-server
+  |
+  +-- runs localctl
+```
+
+That manual setup becomes friction for every later experiment.
+
+A future bounded experiment can investigate:
 
 ```text
 localctl
-    ↓
-Elixir/OTP control plane
-    ↓
-runtime adapter
-    ↓
-llama.cpp
+  |
+  v
+start llama-server child process
+  |
+  v
+observe PID
+  |
+  v
+determine when runtime is actually ready
+  |
+  v
+use runtime
+  |
+  v
+stop the exact process that was started
 ```
 
-At that point Elixir may legitimately own:
-
-- long-lived state ownership
-- request coordination
-- queues
-- runtime lifecycle policy
-- resource policy
-- backpressure
-- qualification state
-- event streams
-- recovery
-- routing
-- escalation
-
-The Go CLI remains a useful independent client and diagnostic tool.
-
-## Future runtime experiments
-
-`llama.cpp` is the first runtime, not the definition of the system.
-
-Later candidates include:
-
-- LM Studio as a managed-runtime comparison
-- an MLX-native path for Apple-specific comparison
-- another runtime if it answers a real question
-
-A useful experiment is eventually:
+This introduces useful systems concepts including:
 
 ```text
-same conceptual model
-same task
-similar profile
-
-llama.cpp/GGUF
-vs
-managed runtime
-vs
-MLX-native
+os/exec
+parent and child processes
+PID ownership
+stdout/stderr ownership
+startup failure
+runtime readiness
+process termination
+cleanup
 ```
 
-This lets the project test whether runtime choice materially changes latency, memory use, contract adherence, behavior, or reliability.
-
-## Native boundary: deliberately deferred
-
-A future native bridge may be justified if measurement proves that:
+Important distinctions include:
 
 ```text
-Go → HTTP → llama-server
+process started
+!=
+server listening
+
+server listening
+!=
+model loaded
+
+model loaded
+!=
+runtime ready
 ```
 
-creates an important limitation.
+This lifecycle capability should simplify later experiments by removing repeated manual runtime setup while making process ownership explicit.
 
-Only then should we investigate something like:
+---
+
+# Development principle
+
+The project continues to use this progression:
 
 ```text
-Go
- ↓
-cgo / small C or Zig bridge
- ↓
-llama.cpp
+mental model
+    |
+    v
+identify one property
+    |
+    v
+predict behavior
+    |
+    v
+small experiment
+    |
+    v
+observe evidence
+    |
+    v
+compare prediction with reality
+    |
+    v
+update mental model
+    |
+    v
+add the minimum implementation needed
 ```
 
-Native complexity must answer a demonstrated problem.
-
-## Evidence model: conceptual shape
-
-The exact schema is intentionally not committed yet, but the system should preserve distinctions like these:
+The important unit of progress is not merely:
 
 ```text
-RunEvidence
-├── identity
-│   ├── run_id
-│   ├── timestamp
-│   └── localctl_version
-├── machine
-│   ├── os
-│   ├── arch
-│   └── relevant hardware facts
-├── runtime
-│   ├── name
-│   ├── version
-│   ├── endpoint/process identity
-│   └── runtime configuration
-├── model
-│   ├── model identity
-│   ├── artifact identity
-│   ├── quantization if known
-│   └── profile identity
-├── task
-│   ├── fixture/capability identity
-│   └── input
-├── observation
-│   ├── raw response
-│   ├── parsed response
-│   ├── timing
-│   ├── transport result
-│   ├── contract result
-│   └── validation result
-└── error/failure evidence
+feature completed
 ```
-
-A later qualification record should reference evidence rather than overwrite it.
-
-## Failure model
-
-Failures are part of the curriculum and part of the product.
-
-We should intentionally exercise cases such as:
-
-- `llama-server` unavailable
-- invalid model path
-- model load failure
-- wrong port
-- loading never becomes ready
-- request timeout
-- request cancellation
-- malformed/unexpected server response
-- malformed model output
-- model ignores output contract
-- runtime crash
-- partial output
-- child process receives a signal
-- evidence write fails
-- stale runtime state
-- runtime version changes
-- concurrent requests contend
-
-For meaningful failures, ask:
-
-```text
-Who detected it?
-Who owns recovery?
-What state may be stale?
-What evidence survived?
-Can the operation safely retry?
-Could retry duplicate work?
-What should the operator see?
-```
-
-## Go design policy
-
-The project should teach idiomatic Go rather than recreating another language in Go syntax.
-
-Default preferences:
-
-- plain structs
-- explicit errors
-- small packages
-- small interfaces only where a real behavioral boundary exists
-- composition
-- `context.Context` across cancellable external operations
-- simple constructors when construction invariants exist
-- standard library before dependencies
-- clear resource/process ownership
-
-Avoid premature architecture such as:
-
-```text
-internal/domain/services/repositories/adapters/ports/...
-```
-
-before the code demonstrates a need for it.
-
-Do not create interfaces solely so a test can mock something.
-
-## Dependency policy
-
-Start mostly with the Go standard library.
-
-Before adding a dependency, answer:
-
-1. What real problem does it solve?
-2. What would the standard-library version require?
-3. What coupling and maintenance does the dependency add?
-4. Is the trade worth it now?
-
-A CLI framework may eventually be justified. It is not automatically justified for M0.
-
-## Configuration policy
-
-Configuration should remain simple until the system has enough settings to justify more machinery.
-
-When multiple sources exist, precedence must be explicit and tested. A likely shape might eventually be:
-
-```text
-CLI flag
-→ environment
-→ config file
-→ default
-```
-
-but this is not committed until a real configuration requirement appears.
-
-Important runtime configuration must never be silently guessed when that guess would make evidence ambiguous.
-
-## Testing doctrine
-
-A passing test is not automatically proof of the intended property.
-
-For consequential tests, identify:
-
-```text
-claimed property
-mechanism exercised
-evidence produced
-remaining gap
-```
-
-Useful tools may include:
-
-- `go test ./...`
-- `httptest`
-- integration tests against a controlled `llama-server`
-- fixtures
-- failure injection
-- repeated runs
-- `go test -race ./...`
-
-Do not maximize test count. Test the property at the boundary where it can actually fail.
-
-## Repository structure
-
-Do not create this entire structure immediately. It is a directional map, not a scaffolding instruction.
-
-A plausible mature shape might become:
-
-```text
-localctl/
-├── README.md
-├── go.mod
-├── cmd/
-│   └── localctl/
-├── internal/
-│   ├── runtime/
-│   ├── evidence/
-│   ├── fixture/
-│   └── qualification/
-├── docs/
-│   └── PSEUDOCODE.md
-├── fixtures/
-└── testdata/
-```
-
-M0 may need almost none of that.
-
-The rule is: earn the directory when the responsibility exists.
-
-## Development checkpoint format
-
-For each meaningful milestone, record enough to answer:
-
-```text
-OBJECTIVE
-
-PROPERTY WE NEEDED
-
-WHAT WE BUILT
-
-WHAT THE OPERATOR SHOULD NOW UNDERSTAND
-
-VALIDATION
-
-OBSERVED EVIDENCE
-
-KNOWN FAILURE MODES
-
-WHAT IS PROVEN
-
-WHAT IS NOT PROVEN
-
-NEXT DECISION
-```
-
-Small milestones should stay small. This is a reasoning aid, not report-writing theater.
-
-## Scope-drift check
-
-Before adding significant code, ask:
-
-1. What property are we trying to establish?
-2. What evidence would establish it?
-3. Is this the smallest implementation that can produce that evidence?
-4. Are we consuming a decision that has not actually been made yet?
-5. Are we introducing an abstraction for a future runtime/client/scheduler that does not exist?
-6. Are we confusing model output with verified completion?
-7. Are we preserving the raw evidence needed to revisit this conclusion later?
-
-If the answer exposes scope drift, reduce the change.
-
-## Current status
-
-The repository begins in the learning/bootstrap phase.
-
-The intended next move is **M0**, not runtime orchestration:
-
-1. establish the Go module and smallest executable;
-2. understand `package main`, `func main()`, build/run/test, arguments, and process exit;
-3. validate the executable locally;
-4. then manually inspect `llama-server` before writing Go that manages it.
-
-No later milestone should be considered implemented merely because it is documented here.
-
-## Definition of project success
-
-The project is successful if it eventually lets us answer questions such as:
-
-- What local configurations on this machine have actually demonstrated a capability?
-- What evidence supports that statement?
-- How current is that evidence?
-- What does the configuration cost in latency, memory, and switching overhead?
-- Can the current warm model perform the request adequately?
-- When should local execution be rejected or escalated?
-- Can an external coding tool request a capability without caring which model currently provides it?
-
-A larger end-to-end experiment should eventually compare a frontier baseline with local-first execution over a bounded real coding task set and measure verified outcomes, local completions, escalations, bad routing decisions, latency, model switches, and failures.
-
-The optimization target is not "use local at all costs."
 
 It is:
 
-> Use the least expensive capable intelligence while refusing to treat unproven local capability as fact.
+```text
+property understood
++
+property demonstrated
++
+evidence inspected
+```
+
+Complexity should be introduced only when the property being protected requires it.
