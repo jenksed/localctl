@@ -52,6 +52,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "compare":
 		return runCompare(args, stdout, stderr)
 
+	case "insights":
+		return runInsights(args, stdout, stderr)
+
 	case "evidence":
 		return runEvidence(args, stdout, stderr)
 
