@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -150,4 +152,36 @@ func TestChildProcessGracefulTermination(t *testing.T) {
 	if !cmd.ProcessState.Success() {
 		t.Fatalf("expected graceful shutdown to succeed")
 	}
+}
+
+func TestChildSurvivesParentExit(t *testing.T) {
+	cmd := exec.Command(
+		"/bin/sh",
+		"-c",
+		`exec sleep 20`,
+	)
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("could not start child: %v", err)
+	}
+
+	pid := cmd.Process.Pid
+
+	if err := os.WriteFile(
+		"/tmp/localctl-child-survival.pid",
+		[]byte(strconv.Itoa(pid)),
+		0600,
+	); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		t.Fatalf("could not record child PID: %v", err)
+	}
+
+	t.Logf("started child PID: %d", pid)
+
+	// Intentionally do not call Wait or Kill here.
+	//
+	// The property under experiment is whether this child remains
+	// alive after the Go test process that started it exits.
 }
