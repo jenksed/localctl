@@ -76,3 +76,53 @@ func TestExerciseUnknown(t *testing.T) {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
+
+func TestDecideLabRuntime(t *testing.T) {
+	model := modelArtifact{Path: "/models/granite.gguf"}
+
+	tests := []struct {
+		name  string
+		state *runtimeState
+		ready bool
+		want  labRuntimeAction
+	}{
+		{
+			name: "start without state",
+			want: labRuntimeStart,
+		},
+		{
+			name:  "reuse same ready model",
+			state: &runtimeState{Model: "/models/granite.gguf"},
+			ready: true,
+			want:  labRuntimeReuse,
+		},
+		{
+			name:  "switch different ready model",
+			state: &runtimeState{Model: "/models/ornith.gguf"},
+			ready: true,
+			want:  labRuntimeSwitch,
+		},
+		{
+			name:  "reconcile state that is not ready",
+			state: &runtimeState{Model: "/models/granite.gguf"},
+			ready: false,
+			want:  labRuntimeReconcile,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decideLabRuntime(tt.state, tt.ready, model)
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestBaselineOneLine(t *testing.T) {
+	got := baselineOneLine("one\n  two\tthree", 80)
+	if got != "one two three" {
+		t.Fatalf("unexpected normalized detail: %q", got)
+	}
+}
