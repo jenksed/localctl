@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/url"
 	"reflect"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestAutomaticRadarMaxParamsUsesConservativeMachineBudget(t *testing.T) {
 	}
 }
 
-func TestParametersFromModelID(t *testing.T) {
+func TestParametersFromModelIDIsOnlyAHint(t *testing.T) {
 	tests := map[string]float64{
 		"Qwen/Qwen3.5-9B-GGUF":       9,
 		"org/Gemma-4-E4B-it-GGUF":    4,
@@ -34,26 +35,82 @@ func TestParametersFromModelID(t *testing.T) {
 	}
 }
 
-func TestRadarFiltersForMachineRecencyAndSpecialists(t *testing.T) {
+func TestRadarLiveQueryUsesFirstClassGGUFAndParameterFilters(t *testing.T) {
+	criteria := defaultRadarCriteria()
+	machine := machineFingerprintRecord{MemoryBytes: 16 * 1024 * 1024 * 1024}
+	endpoint, err := url.Parse(radarQueryURL(criteria, machine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := endpoint.Query()
+	if got := query.Get("filter"); got != "gguf" {
+		t.Fatalf("expected first-class GGUF filter, got %q", got)
+	}
+	if got := query.Get("num_parameters"); got != "max:13.5B" {
+		t.Fatalf("expected Hugging Face parameter filter max:13.5B, got %q", got)
+	}
+	if got := query.Get("search"); got != "" {
+		t.Fatalf("repository-name search must not stand in for GGUF filtering, got %q", got)
+	}
+}
+
+func TestRadarFitAnyDoesNotSendParameterFilter(t *testing.T) {
+	criteria := defaultRadarCriteria()
+	criteria.Fit = "any"
+	machine := machineFingerprintRecord{MemoryBytes: 16 * 1024 * 1024 * 1024}
+	endpoint, err := url.Parse(radarQueryURL(criteria, machine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := endpoint.Query().Get("num_parameters"); got != "" {
+		t.Fatalf("fit=any should omit parameter filter, got %q", got)
+	}
+}
+
+func TestRadarRanksRecencyAndFiltersSpecialists(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	criteria := defaultRadarCriteria()
 	machine := machineFingerprintRecord{MemoryBytes: 16 * 1024 * 1024 * 1024}
 	results := []hfModelResult{
-		{ID: "example/FreshCoder-7B-GGUF", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code", "text-generation", "license:apache-2.0"}},
-		{ID: "example/TooLargeCoder-32B-GGUF", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code"}},
-		{ID: "example/OldCoder-7B-GGUF", LastModified: now.Add(-120 * 24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code"}},
-		{ID: "example/TinyEmbed-0.6B-GGUF", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"embedding", "feature-extraction"}},
-		{ID: "example/UnknownSize-GGUF", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code"}},
+		{ID: "example/FreshCoder-7B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "code", "text-generation", "license:apache-2.0"}},
+		{ID: "example/OldCoder-7B", LastModified: now.Add(-120 * 24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "code"}},
+		{ID: "example/TinyEmbed-0.6B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "embedding", "feature-extraction"}},
+		{ID: "example/NotGGUF-7B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code"}},
 	}
 	got := rankRadarResults(results, criteria, machine, nil, now)
 	if len(got) != 1 {
-		t.Fatalf("expected only the fresh machine-screened coding candidate, got %#v", got)
+		t.Fatalf("expected only the fresh general GGUF candidate, got %#v", got)
 	}
-	if got[0].Repository != "example/FreshCoder-7B-GGUF" {
+	if got[0].Repository != "example/FreshCoder-7B" {
 		t.Fatalf("unexpected candidate: %#v", got[0])
 	}
 	if got[0].LocalStatus != "UNTESTED_LOCAL" {
 		t.Fatalf("external discovery must remain untested locally, got %s", got[0].LocalStatus)
+	}
+	if got[0].Fit != "COMFORTABLE_SCREEN" {
+		t.Fatalf("expected visible screening label, got %q", got[0].Fit)
+	}
+}
+
+func TestRadarDoesNotUseRepositoryParameterHintAsFitAuthority(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	criteria := defaultRadarCriteria()
+	machine := machineFingerprintRecord{MemoryBytes: 8 * 1024 * 1024 * 1024}
+	// The repository name says 32B. If Hugging Face returned this from the live
+	// max:6.7B query, LocalCTL must not second-guess authoritative server metadata
+	// using a repository-name heuristic. The parsed value remains a display hint.
+	result := hfModelResult{
+		ID:           "example/WeirdName-32B-GGUF",
+		LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339),
+		Downloads:    100,
+		Tags:         []string{"gguf", "code"},
+	}
+	got := rankRadarResults([]hfModelResult{result}, criteria, machine, nil, now)
+	if len(got) != 1 {
+		t.Fatalf("repository-name parameter hint incorrectly became fit authority: %#v", got)
+	}
+	if got[0].ParametersB != 32 {
+		t.Fatalf("expected repository-name display hint, got %.1f", got[0].ParametersB)
 	}
 }
 
@@ -63,7 +120,7 @@ func TestRadarCanExplicitlySearchForEmbeddingSpecialists(t *testing.T) {
 	criteria.Uses = []string{"embedding"}
 	machine := machineFingerprintRecord{MemoryBytes: 16 * 1024 * 1024 * 1024}
 	results := []hfModelResult{
-		{ID: "example/TinyEmbed-0.6B-GGUF", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"embedding", "feature-extraction", "license:apache-2.0"}},
+		{ID: "example/TinyEmbed-0.6B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "embedding", "feature-extraction", "license:apache-2.0"}},
 	}
 	got := rankRadarResults(results, criteria, machine, nil, now)
 	if len(got) != 1 || !reflect.DeepEqual(got[0].UseMatches, []string{"embedding"}) {
@@ -115,7 +172,7 @@ func TestEcosystemOpportunityNeverBecomesRecommendation(t *testing.T) {
 		ParametersB:  7,
 		LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339),
 		UseMatches:   []string{"coding", "debugging", "review"},
-		Fit:          "COMFORTABLE",
+		Fit:          "COMFORTABLE_SCREEN",
 		LocalStatus:  "UNTESTED_LOCAL",
 		Why:          "matches requested uses",
 		Source:       "https://huggingface.co/example/FreshCoder-7B-GGUF",

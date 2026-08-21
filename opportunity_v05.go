@@ -77,7 +77,7 @@ func ecosystemOpportunityPriority(candidate radarCandidate, now time.Time) int {
 		matches = 3
 	}
 	priority += matches * 20
-	if candidate.Fit == "COMFORTABLE" {
+	if strings.HasPrefix(candidate.Fit, "COMFORTABLE") {
 		priority += 5
 	}
 	if modified, err := time.Parse(time.RFC3339, candidate.LastModified); err == nil {
@@ -99,7 +99,7 @@ func buildRadarLearningOpportunities(candidates []radarCandidate, now time.Time)
 	for _, candidate := range candidates {
 		why := candidate.Why
 		if candidate.ParametersB > 0 {
-			why += fmt.Sprintf("; parsed size class %.1fB screens as %s", candidate.ParametersB, strings.ToLower(candidate.Fit))
+			why += fmt.Sprintf("; repository name suggests ~%.1fB (display hint only)", candidate.ParametersB)
 		}
 		opportunities = append(opportunities, learningOpportunity{
 			Kind:        "ecosystem-candidate",

@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,12 +30,12 @@ type radarCriteria struct {
 
 type radarCandidate struct {
 	Repository      string   `json:"repository"`
-	ParametersB     float64  `json:"parameters_b,omitempty"`
+	ParametersB     float64  `json:"parameter_hint_b,omitempty"`
 	LastModified    string   `json:"last_modified,omitempty"`
 	Downloads       int      `json:"downloads,omitempty"`
 	UseMatches      []string `json:"use_matches,omitempty"`
 	License         string   `json:"license,omitempty"`
-	Fit             string   `json:"fit"`
+	Fit             string   `json:"fit_screen"`
 	LocalStatus     string   `json:"local_status"`
 	Why             string   `json:"why"`
 	Source          string   `json:"source"`
@@ -83,6 +84,7 @@ func loadRadarCriteria() (radarCriteria, error) {
 	if err := validateRadarCriteria(criteria); err != nil {
 		return radarCriteria{}, err
 	}
+	criteria.Uses = normalizeRadarUses(criteria.Uses)
 	return criteria, nil
 }
 
@@ -170,9 +172,10 @@ func machineMemoryGB(machine machineFingerprintRecord) float64 {
 	return float64(machine.MemoryBytes) / float64(int64(1)<<30)
 }
 
-// automaticRadarMaxParams is a discovery screen, not a runtime-fit claim.
+// automaticRadarMaxParams produces a discovery threshold, not a runtime-fit claim.
 // It reserves meaningful memory for the OS, editor, KV cache, and runtime overhead,
 // then uses a deliberately conservative Q4-class bytes-per-parameter estimate.
+// Hugging Face's parameter metadata enforces this threshold for live discovery.
 func automaticRadarMaxParams(machine machineFingerprintRecord, fit string) float64 {
 	memoryGB := machineMemoryGB(machine)
 	if memoryGB <= 0 || fit == "any" {
@@ -194,6 +197,9 @@ func effectiveRadarMaxParams(criteria radarCriteria, machine machineFingerprintR
 	return automaticRadarMaxParams(machine, criteria.Fit)
 }
 
+// parametersFromModelID is deliberately only a display hint. Repository naming is
+// not authoritative enough to enforce machine fit; the live query uses Hugging
+// Face's num_parameters filter for that boundary.
 func parametersFromModelID(id string) float64 {
 	matches := parameterCountPattern.FindAllStringSubmatch(id, -1)
 	var result float64
@@ -286,25 +292,21 @@ func isSpecialistResult(result hfModelResult, kind string) bool {
 	}
 }
 
-func fitLabel(params, max float64, criteria radarCriteria) string {
-	if params <= 0 {
-		return "UNKNOWN"
+func fitScreenLabel(criteria radarCriteria, maxParams float64) string {
+	if maxParams <= 0 {
+		return "ANY"
 	}
-	if max <= 0 {
-		return strings.ToUpper(criteria.Fit)
-	}
-	if params <= max*0.72 {
-		return "COMFORTABLE"
-	}
-	return strings.ToUpper(criteria.Fit)
+	return strings.ToUpper(criteria.Fit) + "_SCREEN"
 }
 
+// rankRadarResults intentionally does not enforce parameter count from repository
+// names. Live results have already passed Hugging Face's num_parameters screen.
+// This function ranks metadata candidates after that external screening step.
 func rankRadarResults(results []hfModelResult, criteria radarCriteria, machine machineFingerprintRecord, installed []modelArtifact, now time.Time) []radarCandidate {
 	maxParams := effectiveRadarMaxParams(criteria, machine)
 	var candidates []radarCandidate
 	for _, result := range results {
-		lower := strings.ToLower(result.ID)
-		if !strings.Contains(lower, "gguf") {
+		if !hasHFGGUFSignal(result) {
 			continue
 		}
 		embedding := isSpecialistResult(result, "embedding")
@@ -314,14 +316,6 @@ func rankRadarResults(results []hfModelResult, criteria radarCriteria, machine m
 		}
 		if reranking && !requestedSpecialist(criteria, "reranking") {
 			continue
-		}
-		params := parametersFromModelID(result.ID)
-		if maxParams > 0 {
-			// If fit is part of the criteria, unknown size is not a match.
-			// The user can choose fit=any to inspect candidates LocalCTL cannot screen.
-			if params <= 0 || params > maxParams {
-				continue
-			}
 		}
 		modified, _ := time.Parse(time.RFC3339, result.LastModified)
 		if criteria.ReleaseDays > 0 {
@@ -356,21 +350,18 @@ func rankRadarResults(results []hfModelResult, criteria radarCriteria, machine m
 			}
 		}
 		rank := len(matches)*100 + recencyRank*10
-		if params > 0 && maxParams > 0 && params <= maxParams*0.72 {
-			rank += 5
-		}
-		why := "new GGUF candidate that passes your current machine/discovery criteria"
+		why := "new GGUF candidate that passed your current Hugging Face discovery screen"
 		if len(matches) > 0 {
 			why = "matches requested uses: " + strings.Join(matches, ", ")
 		}
 		candidates = append(candidates, radarCandidate{
 			Repository:      result.ID,
-			ParametersB:     params,
+			ParametersB:     parametersFromModelID(result.ID),
 			LastModified:    result.LastModified,
 			Downloads:       result.Downloads,
 			UseMatches:      matches,
 			License:         license,
-			Fit:             fitLabel(params, maxParams, criteria),
+			Fit:             fitScreenLabel(criteria, maxParams),
 			LocalStatus:     "UNTESTED_LOCAL",
 			Why:             why,
 			Source:          "https://huggingface.co/" + result.ID,
@@ -394,8 +385,37 @@ func rankRadarResults(results []hfModelResult, criteria radarCriteria, machine m
 	return candidates
 }
 
+func hasHFGGUFSignal(result hfModelResult) bool {
+	if strings.Contains(strings.ToLower(result.ID), "gguf") {
+		return true
+	}
+	for _, tag := range result.Tags {
+		if strings.EqualFold(tag, "gguf") {
+			return true
+		}
+	}
+	return false
+}
+
+func radarQueryURL(criteria radarCriteria, machine machineFingerprintRecord) string {
+	values := url.Values{}
+	values.Set("filter", "gguf")
+	values.Set("sort", "lastModified")
+	values.Set("direction", "-1")
+	values.Set("limit", "100")
+	values.Set("full", "true")
+	if maxParams := effectiveRadarMaxParams(criteria, machine); maxParams > 0 {
+		values.Set("num_parameters", fmt.Sprintf("max:%.1fB", maxParams))
+	}
+	return "https://huggingface.co/api/models?" + values.Encode()
+}
+
 func fetchHFRadarResults(client *http.Client) ([]hfModelResult, error) {
-	const endpoint = "https://huggingface.co/api/models?search=GGUF&sort=lastModified&direction=-1&limit=100&full=true"
+	criteria, err := loadRadarCriteria()
+	if err != nil {
+		return nil, err
+	}
+	endpoint := radarQueryURL(criteria, machineFingerprint())
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
@@ -403,7 +423,7 @@ func fetchHFRadarResults(client *http.Client) ([]hfModelResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "localctl-model-radar/2")
+	req.Header.Set("User-Agent", "localctl-model-radar/3")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -503,19 +523,20 @@ func runRadarScan(jsonOutput bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Try: localctl radar criteria")
 		return 0
 	}
-	fmt.Fprintln(stdout, "REPOSITORY                                      PARAMS   FIT          MATCHES                 STATUS")
+	fmt.Fprintln(stdout, "REPOSITORY                                      PARAM HINT  FIT SCREEN          MATCHES                 STATUS")
 	for _, candidate := range candidates {
 		params := "?"
 		if candidate.ParametersB > 0 {
-			params = fmt.Sprintf("%.1fB", candidate.ParametersB)
+			params = fmt.Sprintf("~%.1fB", candidate.ParametersB)
 		}
 		matches := "—"
 		if len(candidate.UseMatches) > 0 {
 			matches = strings.Join(candidate.UseMatches, ",")
 		}
-		fmt.Fprintf(stdout, "%-47s %-8s %-12s %-23s %s\n", shorten(candidate.Repository, 47), params, candidate.Fit, shorten(matches, 23), candidate.LocalStatus)
+		fmt.Fprintf(stdout, "%-47s %-11s %-19s %-23s %s\n", shorten(candidate.Repository, 47), params, candidate.Fit, shorten(matches, 23), candidate.LocalStatus)
 	}
 	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "PARAM HINT comes from repository naming only. Hugging Face parameter metadata enforces the live fit screen.")
 	fmt.Fprintln(stdout, "Pick a candidate for the existing audit queue:")
 	fmt.Fprintln(stdout, "  localctl explore select <owner/model-GGUF>")
 	fmt.Fprintln(stdout, "Then install it with your preferred model manager and let LocalCTL test it locally.")
@@ -603,16 +624,16 @@ func printRadarCriteriaSummary(stdout io.Writer, criteria radarCriteria, machine
 	fmt.Fprintf(stdout, "license filter: %s\n", criteria.License)
 	maxParams := effectiveRadarMaxParams(criteria, machine)
 	if criteria.MaxParamsB > 0 {
-		fmt.Fprintf(stdout, "max parameters: %.1fB (explicit)\n", criteria.MaxParamsB)
+		fmt.Fprintf(stdout, "max parameters: %.1fB (explicit; enforced by Hugging Face metadata)\n", criteria.MaxParamsB)
 	} else if maxParams > 0 {
-		fmt.Fprintf(stdout, "max parameters: ~%.1fB (machine-derived screening estimate)\n", maxParams)
+		fmt.Fprintf(stdout, "max parameters: ~%.1fB (machine-derived; enforced by Hugging Face metadata)\n", maxParams)
 	} else {
 		fmt.Fprintln(stdout, "max parameters: no automatic cap (machine memory unavailable or fit=any)")
 	}
 	if memory := machineMemoryGB(machine); memory > 0 {
 		fmt.Fprintf(stdout, "machine memory: %.1f GB\n", memory)
 	}
-	fmt.Fprintln(stdout, "Fit is only a conservative discovery screen. Local loading and measurement are what prove runtime fit.")
+	fmt.Fprintln(stdout, "The parameter threshold is still only a discovery screen. Local loading and measurement prove runtime fit.")
 	if criteria.License != "any" {
 		fmt.Fprintln(stdout, "License filtering uses Hugging Face metadata only; verify the model license before relying on it.")
 	}
