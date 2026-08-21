@@ -27,6 +27,7 @@ jobs:
           if [ -n "$files" ]; then
             echo "These files are not gofmt-clean:"
             echo "$files"
+            gofmt -d $files
             exit 1
           fi
 
