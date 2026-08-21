@@ -20,11 +20,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "lab":
 		fmt.Fprintln(stdout, localctlBanner)
 		fmt.Fprintln(stdout)
-		return runV04Lab(stdout, stderr)
+		return runV05Lab(stdout, stderr)
+	case "next":
+		return runNext(args, stdout, stderr)
 	case "check":
 		return runCheck(stdout, stderr)
 	case "models":
 		return runModelsV031(stdout, stderr)
+	case "radar":
+		return runRadar(args, stdout, stderr)
 	case "explore":
 		return runExplore(args, stdout, stderr)
 	case "profiles":

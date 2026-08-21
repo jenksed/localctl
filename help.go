@@ -9,9 +9,14 @@ func runHelp(stdout io.Writer) int {
 	fmt.Fprintf(stdout, "LocalCTL %s — local model capability lab\n\n", localctlVersion)
 	fmt.Fprintln(stdout, "Start")
 	fmt.Fprintln(stdout, "  localctl lab                         show this machine and the learning loop")
+	fmt.Fprintln(stdout, "  localctl next                        show what is worth learning next")
 	fmt.Fprintln(stdout, "  localctl models                      list installed GGUF models")
 	fmt.Fprintln(stdout, "  localctl audition <model>            guided model characterization")
-	fmt.Fprintln(stdout, "  localctl explore                     find new candidates without re-showing installed models")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Discover candidates")
+	fmt.Fprintln(stdout, "  localctl radar                       scan Hugging Face against this machine and your criteria")
+	fmt.Fprintln(stdout, "  localctl radar criteria              inspect or change the discovery criteria")
+	fmt.Fprintln(stdout, "  localctl explore                     manage the candidate discovery/audit queue")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Know the territory")
 	fmt.Fprintln(stdout, "  localctl capability <model>          derive a current evidence-backed capability map")
@@ -45,6 +50,6 @@ func runHelp(stdout io.Writer) int {
 	fmt.Fprintln(stdout, "  localctl profiles")
 	fmt.Fprintln(stdout, "  localctl exercises [category] [--all]")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "LocalCTL separates observations, deterministic capability derivation, recommendation, and execution authority.")
+	fmt.Fprintln(stdout, "External metadata may propose a question. Only local evidence can support a capability claim, and recommendation still grants no execution authority.")
 	return 0
 }

@@ -18,7 +18,7 @@ func TestCLI(t *testing.T) {
 			name:       "version",
 			args:       []string{"localctl", "version"},
 			wantExit:   0,
-			wantStdout: "localctl 0.4.0\n",
+			wantStdout: "localctl 0.5.0\n",
 			wantStderr: "",
 		},
 		{
