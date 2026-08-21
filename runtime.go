@@ -80,7 +80,7 @@ func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 			},
 		},
 		Temperature: 0,
-		MaxTokens:   32,
+		MaxTokens:   512,
 	}
 
 	body, err := json.Marshal(payload)
@@ -125,7 +125,11 @@ func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprintln(stdout, result.Choices[0].Message.Content)
+	choice := result.Choices[0]
+
+	fmt.Fprintln(stdout, choice.Message.Content)
+	fmt.Fprintf(stderr, "finish_reason: %s\n", choice.FinishReason)
+
 	return 0
 }
 

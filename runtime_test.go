@@ -99,7 +99,6 @@ func TestRuntimeStatusUnreachable(t *testing.T) {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
-
 func TestRuntimeInferSuccess(t *testing.T) {
 	server := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,9 +141,9 @@ func TestRuntimeInferSuccess(t *testing.T) {
 				)
 			}
 
-			if request.MaxTokens != 32 {
+			if request.MaxTokens != 512 {
 				t.Errorf(
-					"expected max tokens 32, got %d",
+					"expected max tokens 512, got %d",
 					request.MaxTokens,
 				)
 			}
@@ -208,10 +207,11 @@ func TestRuntimeInferSuccess(t *testing.T) {
 		t.Fatalf("unexpected stdout: %q", stdout.String())
 	}
 
-	if stderr.String() != "" {
+	if stderr.String() != "finish_reason: stop\n" {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
+
 func TestRuntimeInferMalformedJSON(t *testing.T) {
 	server := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
