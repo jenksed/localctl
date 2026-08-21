@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,15 +13,23 @@ func TestRunInsightsAggregatesFailureKinds(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
+	modelPath := filepath.Join(home, "test-model.gguf")
+	if err := os.WriteFile(modelPath, []byte("test-model-artifact"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(modelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	model := modelArtifact{
 		ID:   "test-model",
 		Name: "test-model.gguf",
-		Path: filepath.Join(home, "test-model.gguf"),
-		Size: 1234,
+		Path: modelPath,
+		Size: info.Size(),
 	}
 
 	passItem := exercise{
-		ID:         "pass",
+		ID:         "pass-v1",
 		Title:      "Pass",
 		Category:   "instruction",
 		Difficulty: "easy",
@@ -42,7 +51,7 @@ func TestRunInsightsAggregatesFailureKinds(t *testing.T) {
 	}
 
 	failItem := exercise{
-		ID:         "extra-output",
+		ID:         "extra-output-v1",
 		Title:      "Extra output",
 		Category:   "instruction",
 		Difficulty: "easy",
@@ -73,7 +82,7 @@ func TestRunInsightsAggregatesFailureKinds(t *testing.T) {
 		"instruction",
 		"contract_extra_output",
 		"good:    1",
-		"v2: 2 runs",
+		"v3: 2 runs",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected %q in insights output:\n%s", expected, output)
