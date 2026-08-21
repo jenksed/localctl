@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+type labRuntimeAction string
+
+const (
+	labRuntimeStart     labRuntimeAction = "start"
+	labRuntimeReuse     labRuntimeAction = "reuse"
+	labRuntimeSwitch    labRuntimeAction = "switch"
+	labRuntimeReconcile labRuntimeAction = "reconcile"
+)
+
 func runCheck(stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "LocalCTL lab check")
 	fmt.Fprintln(stdout)
@@ -35,7 +44,7 @@ func runCheck(stdout, stderr io.Writer) int {
 		if runtimeStatus(runtimeURL, &statusOut, &statusErr) == 0 {
 			fmt.Fprintf(stdout, "runtime        ready    PID %d  %s\n", state.PID, state.ModelID)
 		} else {
-			fmt.Fprintf(stdout, "runtime        stale    PID %d recorded but not ready\n", state.PID)
+			fmt.Fprintf(stdout, "runtime        stale    PID %d recorded; next lab command will reconcile it\n", state.PID)
 		}
 	} else {
 		fmt.Fprintln(stdout, "runtime        stopped")
@@ -61,12 +70,29 @@ func runModels(stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	fmt.Fprintln(stdout, "MODEL ID                                      SIZE       FILE")
+	activePath := ""
+	if state, stateErr := readRuntimeState(); stateErr == nil {
+		var statusOut bytes.Buffer
+		var statusErr bytes.Buffer
+		if runtimeStatus(runtimeURL, &statusOut, &statusErr) == 0 {
+			activePath = state.Model
+		}
+	}
+
+	fmt.Fprintln(stdout, "    MODEL ID                                      SIZE       FILE")
 	for _, model := range models {
-		fmt.Fprintf(stdout, "%-45s %-10s %s\n", model.ID, formatBytes(model.Size), model.Name)
+		marker := " "
+		if model.Path == activePath {
+			marker = "*"
+		}
+		fmt.Fprintf(stdout, "%s   %-45s %-10s %s\n", marker, model.ID, formatBytes(model.Size), model.Name)
 	}
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "You may use an unambiguous substring such as 'granite' or 'ministral' as a model reference.")
+	if activePath != "" {
+		fmt.Fprintln(stdout, "* active managed runtime")
+	}
+	fmt.Fprintln(stdout, "Use an unambiguous substring such as 'granite', 'ministral', or 'ornith'.")
+	fmt.Fprintln(stdout, "Requesting another model from a lab command switches runtimes automatically.")
 	return 0
 }
 
@@ -176,16 +202,8 @@ func executeSingleExercise(item exercise, modelRef string, stdout, stderr io.Wri
 		return 1
 	}
 
-	started, exitCode := ensureRuntimeForModel(model, stdout, stderr)
-	if exitCode != 0 {
+	if _, exitCode := ensureRuntimeForModel(model, stdout, stderr); exitCode != 0 {
 		return exitCode
-	}
-	if started {
-		defer func() {
-			var stopOut bytes.Buffer
-			var stopErr bytes.Buffer
-			_ = runtimeStop(&stopOut, &stopErr)
-		}()
 	}
 
 	fmt.Fprintf(stdout, "\n%s — %s\n", item.ID, item.Title)
@@ -207,6 +225,8 @@ func executeSingleExercise(item exercise, modelRef string, stdout, stderr io.Wri
 	fmt.Fprintln(stdout, outcome.Content)
 	fmt.Fprintln(stdout)
 	printRunSummary(stdout, record)
+	fmt.Fprintf(stdout, "runtime: kept ready for %s\n", model.Name)
+	fmt.Fprintln(stdout, "Switch models by naming another model, or stop explicitly with 'localctl runtime stop'.")
 	return 0
 }
 
@@ -237,20 +257,12 @@ func runBaseline(args []string, stdout, stderr io.Writer) int {
 
 	items := exercisesForCategory(category, includeExtended)
 	if len(items) == 0 {
-		fmt.Fprintf(stderr, "no exercises selected\n")
+		fmt.Fprintln(stderr, "no exercises selected")
 		return 1
 	}
 
-	started, exitCode := ensureRuntimeForModel(model, stdout, stderr)
-	if exitCode != 0 {
+	if _, exitCode := ensureRuntimeForModel(model, stdout, stderr); exitCode != 0 {
 		return exitCode
-	}
-	if started {
-		defer func() {
-			var stopOut bytes.Buffer
-			var stopErr bytes.Buffer
-			_ = runtimeStop(&stopOut, &stopErr)
-		}()
 	}
 
 	fmt.Fprintf(stdout, "\nBaseline lab: %s\n", model.Name)
@@ -260,9 +272,11 @@ func runBaseline(args []string, stdout, stderr io.Writer) int {
 	fail := 0
 	pending := 0
 	errors := 0
+	categoryScores := map[string][2]int{}
+	var failedIDs []string
 
 	for index, item := range items {
-		fmt.Fprintf(stdout, "[%d/%d] %-31s ", index+1, len(items), item.ID)
+		fmt.Fprintf(stdout, "[%2d/%2d] %-31s ", index+1, len(items), item.ID)
 		startedAt := time.Now()
 		outcome, inferenceErr := performInference(runtimeURL, filepath.Base(model.Path), item.Prompt)
 		record, _, persistErr := persistObservation(item, model, startedAt, outcome, inferenceErr)
@@ -272,25 +286,39 @@ func runBaseline(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		if inferenceErr != nil {
-			fmt.Fprintf(stdout, "ERROR %v  [%s]\n", inferenceErr, record.RunID)
+			fmt.Fprintf(stdout, "ERROR %v\n", inferenceErr)
+			fmt.Fprintf(stdout, "        saved: %s\n", record.RunID)
 			errors++
 			continue
 		}
 
+		score := categoryScores[item.Category]
 		switch record.Evaluation.Status {
 		case "pass":
 			pass++
-			fmt.Fprintf(stdout, "PASS  %s  [%s]\n", formatDuration(outcome.Elapsed), record.RunID)
+			score[0]++
+			score[1]++
+			fmt.Fprintf(stdout, "PASS     %s\n", formatDuration(outcome.Elapsed))
 		case "fail":
 			fail++
-			fmt.Fprintf(stdout, "FAIL  %s  [%s]\n", formatDuration(outcome.Elapsed), record.RunID)
+			score[1]++
+			failedIDs = append(failedIDs, item.ID)
+			fmt.Fprintf(stdout, "FAIL     %s\n", formatDuration(outcome.Elapsed))
+			fmt.Fprintf(stdout, "        why: %s\n", baselineOneLine(record.Evaluation.Detail, 150))
+			if !strings.Contains(record.Evaluation.Detail, "got ") {
+				fmt.Fprintf(stdout, "        got: %q\n", baselineOneLine(strings.TrimSpace(outcome.Content), 120))
+			}
+			fmt.Fprintf(stdout, "        saved: %s\n", record.RunID)
 		case "pending":
 			pending++
-			fmt.Fprintf(stdout, "PENDING  %s  [%s]\n", formatDuration(outcome.Elapsed), record.RunID)
+			fmt.Fprintf(stdout, "PENDING  %s\n", formatDuration(outcome.Elapsed))
+			fmt.Fprintf(stdout, "        saved: %s — judge this run later\n", record.RunID)
 		default:
 			errors++
-			fmt.Fprintf(stdout, "%s  [%s]\n", strings.ToUpper(record.Evaluation.Status), record.RunID)
+			fmt.Fprintf(stdout, "%s\n", strings.ToUpper(record.Evaluation.Status))
+			fmt.Fprintf(stdout, "        saved: %s\n", record.RunID)
 		}
+		categoryScores[item.Category] = score
 	}
 
 	scored := pass + fail
@@ -305,8 +333,32 @@ func runBaseline(args []string, stdout, stderr io.Writer) int {
 	if scored > 0 {
 		fmt.Fprintf(stdout, "pass rate:   %.1f%%\n", 100*float64(pass)/float64(scored))
 	}
+
+	var categories []string
+	for name, score := range categoryScores {
+		if score[1] > 0 {
+			categories = append(categories, name)
+		}
+	}
+	sort.Strings(categories)
+	if len(categories) > 0 {
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Auto-scored by category")
+		for _, name := range categories {
+			score := categoryScores[name]
+			fmt.Fprintf(stdout, "%-14s %d/%d  %s\n", name, score[0], score[1], percent(score[0], score[1]))
+		}
+	}
+
+	if len(failedIDs) > 0 {
+		fmt.Fprintln(stdout)
+		fmt.Fprintf(stdout, "Failed exercises: %s\n", strings.Join(failedIDs, ", "))
+		fmt.Fprintln(stdout, "Use 'localctl runs' and 'localctl show <run-id>' to inspect saved evidence.")
+	}
+
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Next: run the same baseline with another model, then use 'localctl compare <model-a> <model-b>'.")
+	fmt.Fprintf(stdout, "Runtime stays ready on %s.\n", model.Name)
+	fmt.Fprintln(stdout, "Run another exercise immediately, or name another model and LocalCTL will switch automatically.")
 
 	if errors > 0 {
 		return 1
@@ -336,26 +388,90 @@ func modelForExecution(reference string) (modelArtifact, error) {
 	return resolveModel("")
 }
 
+func decideLabRuntime(state *runtimeState, ready bool, model modelArtifact) labRuntimeAction {
+	if state == nil {
+		return labRuntimeStart
+	}
+	if !ready {
+		return labRuntimeReconcile
+	}
+	if state.Model == model.Path {
+		return labRuntimeReuse
+	}
+	return labRuntimeSwitch
+}
+
 func ensureRuntimeForModel(model modelArtifact, stdout, stderr io.Writer) (bool, int) {
 	state, err := readRuntimeState()
-	if err == nil {
-		if state.Model != model.Path {
-			fmt.Fprintf(stderr, "managed runtime already uses %s; stop it before running %s\n", filepath.Base(state.Model), model.Name)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(stderr, "could not read managed runtime state: %v\n", err)
 			return false, 1
 		}
-		var statusOut bytes.Buffer
-		var statusErr bytes.Buffer
-		if runtimeStatus(runtimeURL, &statusOut, &statusErr) == 0 {
-			return false, 0
+		if code := runtimeStartModel(model.Path, stdout, stderr); code != 0 {
+			return false, code
 		}
-		fmt.Fprintln(stderr, "managed runtime state exists but runtime is not ready; run 'localctl runtime stop' to reconcile it")
-		return false, 1
+		return true, 0
 	}
 
-	if code := runtimeStartModel(model.Path, stdout, stderr); code != 0 {
-		return false, code
+	var statusOut bytes.Buffer
+	var statusErr bytes.Buffer
+	ready := runtimeStatus(runtimeURL, &statusOut, &statusErr) == 0
+
+	switch decideLabRuntime(&state, ready, model) {
+	case labRuntimeReuse:
+		fmt.Fprintf(stdout, "runtime: reusing %s (PID %d)\n", state.ModelID, state.PID)
+		return false, 0
+
+	case labRuntimeSwitch:
+		fmt.Fprintf(stdout, "runtime: switching %s -> %s\n", state.ModelID, model.Name)
+		if code := runtimeStop(stdout, stderr); code != 0 {
+			return false, code
+		}
+		if code := runtimeStartModel(model.Path, stdout, stderr); code != 0 {
+			return false, code
+		}
+		return true, 0
+
+	case labRuntimeReconcile:
+		fmt.Fprintf(stdout, "runtime: recorded state for %s is not ready; reconciling automatically\n", state.ModelID)
+		if code := reconcileLabRuntimeState(stdout, stderr); code != 0 {
+			return false, code
+		}
+		if code := runtimeStartModel(model.Path, stdout, stderr); code != 0 {
+			return false, code
+		}
+		return true, 0
+
+	default:
+		if code := runtimeStartModel(model.Path, stdout, stderr); code != 0 {
+			return false, code
+		}
+		return true, 0
 	}
-	return true, 0
+}
+
+func reconcileLabRuntimeState(stdout, stderr io.Writer) int {
+	var stopOut bytes.Buffer
+	var stopErr bytes.Buffer
+	_ = runtimeStop(&stopOut, &stopErr)
+
+	statePath, err := runtimeStatePath()
+	if err != nil {
+		fmt.Fprintf(stderr, "could not determine runtime state path: %v\n", err)
+		return 1
+	}
+	if _, statErr := os.Stat(statePath); os.IsNotExist(statErr) {
+		fmt.Fprintln(stdout, "runtime: stale state cleared")
+		return 0
+	}
+
+	message := strings.TrimSpace(stopErr.String())
+	if message == "" {
+		message = "runtime state still exists after reconciliation"
+	}
+	fmt.Fprintf(stderr, "could not reconcile managed runtime: %s\n", message)
+	return 1
 }
 
 func printRunSummary(stdout io.Writer, record runObservation) {
@@ -422,6 +538,9 @@ func runShow(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "result: %s / evaluation %s\n", record.Result.Status, record.Evaluation.Status)
 	fmt.Fprintf(stdout, "finish: %s\n", valueOrUnknown(record.Result.FinishReason))
 	fmt.Fprintf(stdout, "elapsed: %d ms\n", record.Result.ElapsedMS)
+	if record.Evaluation.Detail != "" {
+		fmt.Fprintf(stdout, "evaluation detail: %s\n", record.Evaluation.Detail)
+	}
 	if judgment != nil {
 		fmt.Fprintf(stdout, "judgment: %s", judgment.Verdict)
 		if judgment.Reason != "" {
@@ -591,6 +710,11 @@ func shorten(value string, width int) string {
 		return value[:width]
 	}
 	return value[:width-1] + "…"
+}
+
+func baselineOneLine(value string, width int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	return shorten(value, width)
 }
 
 func percent(part, total int) string {
