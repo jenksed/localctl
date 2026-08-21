@@ -27,13 +27,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runRuntime(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 3 {
-		fmt.Fprintln(stderr, "usage: localctl runtime <status|infer>")
+		fmt.Fprintln(stderr, "usage: localctl runtime <status|inspect|infer>")
 		return 1
 	}
 
 	switch args[2] {
 	case "status":
 		return runtimeStatus(runtimeURL, stdout, stderr)
+
+	case "inspect":
+		return runtimeInspect(runtimeURL, stdout, stderr)
 
 	case "infer":
 		if len(args) < 4 {

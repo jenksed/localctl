@@ -39,7 +39,7 @@ func TestCLI(t *testing.T) {
 			args:       []string{"localctl", "runtime"},
 			wantExit:   1,
 			wantStdout: "",
-			wantStderr: "usage: localctl runtime <status|infer>\n",
+			wantStderr: "usage: localctl runtime <status|inspect|infer>\n",
 		},
 		{
 			name:       "runtime unknown subcommand",

@@ -314,3 +314,131 @@ func TestRuntimeInferHTTPFailure(t *testing.T) {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
+
+func TestRuntimeInspectSuccess(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				t.Errorf("expected GET, got %s", r.Method)
+			}
+
+			if r.URL.Path != "/v1/models" {
+				t.Errorf(
+					"expected /v1/models, got %s",
+					r.URL.Path,
+				)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+
+			w.Write([]byte(`{
+				"data": [
+					{
+						"id": "test-model.gguf",
+						"owned_by": "llamacpp",
+						"meta": {
+							"n_ctx": 2048,
+							"n_ctx_train": 131072,
+							"n_params": 8791592960,
+							"size": 5087248384
+						}
+					}
+				]
+			}`))
+		}),
+	)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runtimeInspect(
+		server.URL,
+		&stdout,
+		&stderr,
+	)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d", exitCode)
+	}
+
+	expectedOutput := `runtime: llamacpp
+model: test-model.gguf
+context: 2048
+training context: 131072
+parameters: 8791592960
+size: 5087248384
+`
+
+	if stdout.String() != expectedOutput {
+		t.Fatalf(
+			"unexpected stdout:\nexpected:\n%s\ngot:\n%s",
+			expectedOutput,
+			stdout.String(),
+		)
+	}
+
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestRuntimeInspectMalformedJSON(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`this is not json`))
+		}),
+	)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runtimeInspect(
+		server.URL,
+		&stdout,
+		&stderr,
+	)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit 1, got %d", exitCode)
+	}
+
+	if !strings.Contains(
+		stderr.String(),
+		"could not decode runtime inspection response:",
+	) {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestRuntimeInspectNoModels(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+
+			w.Write([]byte(`{
+				"data": []
+			}`))
+		}),
+	)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runtimeInspect(
+		server.URL,
+		&stdout,
+		&stderr,
+	)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit 1, got %d", exitCode)
+	}
+
+	if stderr.String() != "runtime inspection returned no models\n" {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+}
