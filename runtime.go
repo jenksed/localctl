@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -160,15 +162,66 @@ func performInference(baseURL, requestedModel, prompt string) (inferenceOutcome,
 	}, nil
 }
 
-func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
-	outcome, err := performInference(baseURL, inferenceModelID(baseURL), prompt)
+func managedModelArtifact(baseURL string) (modelArtifact, bool) {
+	if baseURL != runtimeURL {
+		return modelArtifact{}, false
+	}
+	state, err := readRuntimeState()
+	if err != nil || state.URL != baseURL || state.Model == "" {
+		return modelArtifact{}, false
+	}
+	info, err := os.Stat(state.Model)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		return modelArtifact{}, false
+	}
+	return modelArtifact{
+		ID:   modelSlug(stringsTrimGGUF(filepath.Base(state.Model))),
+		Name: filepath.Base(state.Model),
+		Path: state.Model,
+		Size: info.Size(),
+	}, true
+}
+
+func stringsTrimGGUF(name string) string {
+	return name[:len(name)-len(filepath.Ext(name))]
+}
+
+func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
+	startedAt := time.Now()
+	outcome, inferenceErr := performInference(baseURL, inferenceModelID(baseURL), prompt)
+
+	savedRunID := ""
+	if model, managed := managedModelArtifact(baseURL); managed {
+		item := exercise{
+			ID:          "runtime-infer",
+			Title:       "Runtime inference",
+			Category:    "freeform",
+			Difficulty:  "unscored",
+			Description: "A direct managed-runtime inference. The observation is saved; correctness requires later judgment.",
+			Prompt:      prompt,
+			Evaluation:  evaluationSpec{Kind: evaluationManual},
+		}
+		record, _, persistErr := persistObservation(item, model, startedAt, outcome, inferenceErr)
+		if persistErr != nil {
+			fmt.Fprintf(stderr, "warning: could not save inference evidence: %v\n", persistErr)
+		} else {
+			savedRunID = record.RunID
+		}
+	}
+
+	if inferenceErr != nil {
+		fmt.Fprintln(stderr, inferenceErr)
+		if savedRunID != "" {
+			fmt.Fprintf(stderr, "saved: %s\n", savedRunID)
+		}
 		return 1
 	}
 
 	fmt.Fprintln(stdout, outcome.Content)
 	fmt.Fprintf(stderr, "finish_reason: %s\n", outcome.FinishReason)
+	if savedRunID != "" {
+		fmt.Fprintf(stderr, "saved: %s\n", savedRunID)
+	}
 
 	return 0
 }
