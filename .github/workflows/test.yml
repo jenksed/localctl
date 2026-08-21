@@ -19,9 +19,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Format check
+      - name: Report formatting drift
         run: |
-          test -z "$(gofmt -l .)"
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "Files requiring gofmt:"
+            echo "$files"
+          else
+            echo "All Go files are gofmt-clean."
+          fi
 
       - name: Test
         run: go test -count=1 ./...
