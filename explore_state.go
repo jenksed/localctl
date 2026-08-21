@@ -69,14 +69,6 @@ func saveExploreState(state exploreState) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-func selectedCandidateIDs(state exploreState) map[string]bool {
-	result := map[string]bool{}
-	for _, item := range state.Selected {
-		result[candidateKey(item.Candidate)] = true
-	}
-	return result
-}
-
 func candidateKey(candidate modelRadarCandidate) string {
 	if strings.TrimSpace(candidate.Repository) != "" {
 		return strings.ToLower(strings.TrimSpace(candidate.Repository))
@@ -119,6 +111,27 @@ func candidateFamilyNeedles(candidate modelRadarCandidate) []string {
 	return result
 }
 
+func candidateSelected(candidate modelRadarCandidate, state exploreState) bool {
+	if len(state.Selected) == 0 {
+		return false
+	}
+	key := candidateKey(candidate)
+	candidateNeedles := candidateFamilyNeedles(candidate)
+	for _, item := range state.Selected {
+		if candidateKey(item.Candidate) == key {
+			return true
+		}
+		for _, a := range candidateNeedles {
+			for _, b := range candidateFamilyNeedles(item.Candidate) {
+				if a == b || strings.Contains(a, b) || strings.Contains(b, a) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func pruneInstalledSelections(state exploreState, models []modelArtifact) (exploreState, bool) {
 	kept := state.Selected[:0]
 	changed := false
@@ -134,11 +147,8 @@ func pruneInstalledSelections(state exploreState, models []modelArtifact) (explo
 }
 
 func selectExploreCandidate(state exploreState, candidate modelRadarCandidate) exploreState {
-	key := candidateKey(candidate)
-	for _, item := range state.Selected {
-		if candidateKey(item.Candidate) == key {
-			return state
-		}
+	if candidateSelected(candidate, state) {
+		return state
 	}
 	state.Selected = append(state.Selected, exploreSelection{Candidate: candidate, SelectedAt: time.Now()})
 	return state
