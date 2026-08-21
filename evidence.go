@@ -45,7 +45,7 @@ type runObservation struct {
 	} `json:"input,omitempty"`
 	Machine  machineFingerprintRecord `json:"machine,omitempty"`
 	LocalCTL localctlFingerprintRecord `json:"localctl,omitempty"`
-	Model struct {
+	Model    struct {
 		ID                  string `json:"id"`
 		Name                string `json:"name"`
 		Path                string `json:"path"`
@@ -75,6 +75,10 @@ type runObservation struct {
 		Temperature     float64 `json:"temperature"`
 		MaxTokens       int     `json:"max_tokens"`
 	} `json:"configuration"`
+	Resources struct {
+		RuntimeRSSBytes int64  `json:"runtime_rss_bytes,omitempty"`
+		RSSKind         string `json:"rss_kind,omitempty"`
+	} `json:"resources,omitempty"`
 	Result struct {
 		Status              string  `json:"status"`
 		FinishReason        string  `json:"finish_reason,omitempty"`
@@ -170,6 +174,12 @@ func persistObservation(item exercise, model modelArtifact, startedAt time.Time,
 	record.Runtime.ExecutableMetadataKey = runtimeIdentity.ExecutableKey
 	record.Runtime.Version = runtimeIdentity.Version
 	record.Runtime.StartedAt = runtimeIdentity.StartedAt
+	if runtimeIdentity.PID > 0 {
+		if rss := runtimeRSSBytes(runtimeIdentity.PID); rss > 0 {
+			record.Resources.RuntimeRSSBytes = rss
+			record.Resources.RSSKind = "point_in_time_process_rss"
+		}
+	}
 
 	record.Profile.ID = scope.Profile.ID
 	record.Profile.Context = scope.Profile.Context
@@ -237,7 +247,7 @@ func persistObservation(item exercise, model modelArtifact, startedAt time.Time,
 		return runObservation{}, "", err
 	}
 	if scope.ExperimentKind == "single" {
-		experiment := experimentRecord{SchemaVersion: 1, ID: scope.ExperimentID, Name: scope.Experiment, Kind: scope.ExperimentKind, ModelID: model.ID, ModelPath: model.Path, ProfileID: scope.Profile.ID, PackID: scope.Pack.ID, PackVersion: scope.Pack.Version, InputClass: scope.InputClass, StartedAt: startedAt, CompletedAt: completedAt, Status: "completed"}
+		experiment := experimentRecord{SchemaVersion: 1, ID: scope.ExperimentID, SessionID: scope.SessionID, Name: scope.Experiment, Kind: scope.ExperimentKind, ModelID: model.ID, ModelPath: model.Path, ProfileID: scope.Profile.ID, PackID: scope.Pack.ID, PackVersion: scope.Pack.Version, InputClass: scope.InputClass, StartedAt: startedAt, CompletedAt: completedAt, Status: "completed"}
 		_ = saveExperiment(experiment)
 	}
 	return record, runDir, nil
