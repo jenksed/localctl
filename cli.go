@@ -57,7 +57,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "try":
 		return runTry(args, stdout, stderr)
 	case "baseline":
-		return runBaseline(args, stdout, stderr)
+		return runBaselineV03(args, stdout, stderr)
 	case "runs":
 		return runRuns(stdout, stderr)
 	case "show":
