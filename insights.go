@@ -40,7 +40,7 @@ func runInsights(args []string, stdout, stderr io.Writer) int {
 		selected = &model
 	}
 
-	records, err := listObservations()
+	records, runDirs, err := scanObservationFiles()
 	if err != nil {
 		fmt.Fprintf(stderr, "could not read evidence: %v\n", err)
 		return 1
@@ -92,7 +92,7 @@ func runInsights(args []string, stdout, stderr io.Writer) int {
 			stats.Pending++
 		}
 
-		if _, runDir, findErr := findObservation(record.RunID); findErr == nil {
+		if runDir := runDirs[record.RunID]; runDir != "" {
 			if judgment, judgmentErr := loadJudgment(runDir); judgmentErr == nil && judgment != nil {
 				switch judgment.Verdict {
 				case "good":
