@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -110,11 +111,11 @@ type workTemplate struct {
 }
 
 var workTemplates = map[string]workTemplate{
-	"pr-review": {Title: "Private PR review", Instruction: "Review the supplied diff or PR text. Separate observed changes from inferred risk. Identify the most important correctness concern and one missing test if supported. Do not invent files or behavior. Maximum 220 words."},
-	"summarize": {Title: "Private technical summary", Instruction: "Summarize the supplied material faithfully and concisely. Preserve uncertainty, failures, numbers, and decisions. Do not add facts that are not in the source. Maximum 220 words."},
-	"commit": {Title: "Private commit draft", Instruction: "Draft one concise conventional-style commit subject for the supplied change. Return only the subject and do not invent scope."},
-	"linux-triage": {Title: "Private Linux triage", Instruction: "Analyze the supplied Linux logs or observations. Separate OBSERVED, HYPOTHESIS, and NEXT CHECK. Prefer the smallest discriminating next command. Do not claim a root cause not proven by the input. Maximum 240 words."},
-	"docker-triage": {Title: "Private Docker triage", Instruction: "Analyze the supplied Docker logs, inspect output, or observations. Separate OBSERVED, HYPOTHESIS, and NEXT CHECK. Respect host/container/network/storage boundaries. Maximum 240 words."},
+	"pr-review":         {Title: "Private PR review", Instruction: "Review the supplied diff or PR text. Separate observed changes from inferred risk. Identify the most important correctness concern and one missing test if supported. Do not invent files or behavior. Maximum 220 words."},
+	"summarize":         {Title: "Private technical summary", Instruction: "Summarize the supplied material faithfully and concisely. Preserve uncertainty, failures, numbers, and decisions. Do not add facts that are not in the source. Maximum 220 words."},
+	"commit":            {Title: "Private commit draft", Instruction: "Draft one concise conventional-style commit subject for the supplied change. Return only the subject and do not invent scope."},
+	"linux-triage":      {Title: "Private Linux triage", Instruction: "Analyze the supplied Linux logs or observations. Separate OBSERVED, HYPOTHESIS, and NEXT CHECK. Prefer the smallest discriminating next command. Do not claim a root cause not proven by the input. Maximum 240 words."},
+	"docker-triage":     {Title: "Private Docker triage", Instruction: "Analyze the supplied Docker logs, inspect output, or observations. Separate OBSERVED, HYPOTHESIS, and NEXT CHECK. Respect host/container/network/storage boundaries. Maximum 240 words."},
 	"kubernetes-triage": {Title: "Private Kubernetes triage", Instruction: "Analyze the supplied Kubernetes events, describe output, logs, or manifests. Separate OBSERVED, HYPOTHESIS, and NEXT CHECK. Distinguish workload, scheduling, service, probe, storage, RBAC, and network evidence. Maximum 260 words."},
 }
 
@@ -193,6 +194,6 @@ func workKindList() string {
 	for kind := range workTemplates {
 		kinds = append(kinds, kind)
 	}
-	// deterministic enough for help output without importing another sorting abstraction here.
+	sort.Strings(kinds)
 	return strings.Join(kinds, ", ")
 }
