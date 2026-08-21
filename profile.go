@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const localctlVersion = "0.3.0"
+const localctlVersion = "0.4.0"
 
 type profileDefinition struct {
 	ID          string  `json:"id"`
