@@ -56,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRecommend(args, stdout, stderr)
 	case "requalify":
 		return runRequalify(args, stdout, stderr)
+	case "intelligence":
+		return runIntelligence(args, stdout, stderr)
 	case "report":
 		return runReport(args, stdout, stderr)
 	case "gaps":
