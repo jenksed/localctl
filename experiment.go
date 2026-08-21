@@ -126,7 +126,7 @@ func loadActiveExperiment() (*experimentRecord, error) {
 func currentObservationScope(item exercise) observationScope {
 	if scopedObservation != nil {
 		scope := *scopedObservation
-		if scope.Pack.ID == "" || scope.Pack.ID == "audition" {
+		if scope.ExperimentKind == "audition" || scope.Pack.ID == "" || scope.Pack.ID == "audition" {
 			scope.Pack = inferredPackForExercise(item)
 		}
 		if scope.InputClass == "" {
