@@ -113,6 +113,13 @@ func TestRuntimeInferSuccess(t *testing.T) {
 				)
 			}
 
+			if r.Header.Get("Content-Type") != "application/json" {
+				t.Errorf(
+					"expected Content-Type application/json, got %q",
+					r.Header.Get("Content-Type"),
+				)
+			}
+
 			var request chatRequest
 
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -127,10 +134,32 @@ func TestRuntimeInferSuccess(t *testing.T) {
 				)
 			}
 
+			if request.Temperature != 0 {
+				t.Errorf(
+					"expected temperature 0, got %v",
+					request.Temperature,
+				)
+			}
+
+			if request.MaxTokens != 32 {
+				t.Errorf(
+					"expected max tokens 32, got %d",
+					request.MaxTokens,
+				)
+			}
+
 			if len(request.Messages) != 1 {
 				t.Fatalf(
 					"expected 1 message, got %d",
 					len(request.Messages),
+				)
+			}
+
+			if request.Messages[0].Role != "user" {
+				t.Errorf(
+					"expected role %q, got %q",
+					"user",
+					request.Messages[0].Role,
 				)
 			}
 
@@ -182,7 +211,6 @@ func TestRuntimeInferSuccess(t *testing.T) {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
-
 func TestRuntimeInferMalformedJSON(t *testing.T) {
 	server := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
