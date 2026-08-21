@@ -33,8 +33,8 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-func runtimeStatus(stdout, stderr io.Writer) int {
-	resp, err := http.Get(runtimeURL + "/health")
+func runtimeStatus(baseURL string, stdout, stderr io.Writer) int {
+	resp, err := http.Get(baseURL + "/health")
 	if err != nil {
 		fmt.Fprintf(stderr, "runtime unreachable: %v\n", err)
 		return 1
@@ -50,7 +50,7 @@ func runtimeStatus(stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runtimeInfer(prompt string, stdout, stderr io.Writer) int {
+func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 	payload := chatRequest{
 		Model: modelID,
 		Messages: []message{
@@ -71,7 +71,7 @@ func runtimeInfer(prompt string, stdout, stderr io.Writer) int {
 
 	req, err := http.NewRequest(
 		http.MethodPost,
-		runtimeURL+"/v1/chat/completions",
+		baseURL+"/v1/chat/completions",
 		bytes.NewReader(body),
 	)
 	if err != nil {

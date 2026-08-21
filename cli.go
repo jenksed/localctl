@@ -33,7 +33,7 @@ func runRuntime(args []string, stdout, stderr io.Writer) int {
 
 	switch args[2] {
 	case "status":
-		return runtimeStatus(stdout, stderr)
+		return runtimeStatus(runtimeURL, stdout, stderr)
 
 	case "infer":
 		if len(args) < 4 {
@@ -41,7 +41,7 @@ func runRuntime(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		return runtimeInfer(args[3], stdout, stderr)
+		return runtimeInfer(runtimeURL, args[3], stdout, stderr)
 
 	default:
 		fmt.Fprintf(stderr, "unknown runtime command: %s\n", args[2])
