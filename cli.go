@@ -16,6 +16,36 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "localctl dev")
 		return 0
 
+	case "check":
+		return runCheck(stdout, stderr)
+
+	case "models":
+		return runModels(stdout, stderr)
+
+	case "exercises":
+		return runExercises(args, stdout, stderr)
+
+	case "exercise":
+		return runExercise(args, stdout, stderr)
+
+	case "try":
+		return runTry(args, stdout, stderr)
+
+	case "baseline":
+		return runBaseline(args, stdout, stderr)
+
+	case "runs":
+		return runRuns(stdout, stderr)
+
+	case "show":
+		return runShow(args, stdout, stderr)
+
+	case "judge":
+		return runJudge(args, stdout, stderr)
+
+	case "compare":
+		return runCompare(args, stdout, stderr)
+
 	case "runtime":
 		return runRuntime(args, stdout, stderr)
 
@@ -47,6 +77,14 @@ func runRuntime(args []string, stdout, stderr io.Writer) int {
 		return runtimeInfer(runtimeURL, args[3], stdout, stderr)
 
 	case "start":
+		if len(args) >= 4 {
+			model, err := resolveModel(args[3])
+			if err != nil {
+				fmt.Fprintf(stderr, "model resolution failed: %v\n", err)
+				return 1
+			}
+			return runtimeStartModel(model.Path, stdout, stderr)
+		}
 		return runtimeStart(stdout, stderr)
 
 	case "stop":

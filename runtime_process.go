@@ -24,25 +24,43 @@ type runtimeState struct {
 	PID        int       `json:"pid"`
 	Executable string    `json:"executable"`
 	Model      string    `json:"model"`
+	ModelID    string    `json:"model_id,omitempty"`
 	URL        string    `json:"url"`
 	StartedAt  time.Time `json:"started_at"`
 }
 
-func runtimeStart(stdout, stderr io.Writer) int {
+func defaultModelPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "could not determine home directory: %v\n", err)
-		return 1
+		return "", err
 	}
 
-	modelPath := filepath.Join(
+	return filepath.Join(
 		home,
 		".lmstudio",
 		"models",
 		"ibm-granite",
 		"granite-4.1-8b-GGUF",
 		"granite-4.1-8b-Q4_K_S.gguf",
-	)
+	), nil
+}
+
+func runtimeStart(stdout, stderr io.Writer) int {
+	modelPath, err := defaultModelPath()
+	if err != nil {
+		fmt.Fprintf(stderr, "could not determine default model path: %v\n", err)
+		return 1
+	}
+
+	return runtimeStartModel(modelPath, stdout, stderr)
+}
+
+func runtimeStartModel(modelPath string, stdout, stderr io.Writer) int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(stderr, "could not determine home directory: %v\n", err)
+		return 1
+	}
 
 	if _, err := os.Stat(llamaServerPath); err != nil {
 		fmt.Fprintf(stderr, "llama-server not available: %v\n", err)
@@ -113,13 +131,13 @@ func runtimeStart(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// The child inherited its own copy of the file descriptor.
 	_ = logFile.Close()
 
 	state := runtimeState{
 		PID:        cmd.Process.Pid,
 		Executable: llamaServerPath,
 		Model:      modelPath,
+		ModelID:    filepath.Base(modelPath),
 		URL:        runtimeURL,
 		StartedAt:  startedAt,
 	}
@@ -148,9 +166,9 @@ func runtimeStart(stdout, stderr io.Writer) int {
 		var healthErr bytes.Buffer
 
 		if runtimeStatus(runtimeURL, &healthOut, &healthErr) == 0 {
-			fmt.Fprintf(stdout, "runtime started\n")
+			fmt.Fprintln(stdout, "runtime started")
 			fmt.Fprintf(stdout, "pid: %d\n", cmd.Process.Pid)
-			fmt.Fprintf(stdout, "model: %s\n", modelID)
+			fmt.Fprintf(stdout, "model: %s\n", state.ModelID)
 			fmt.Fprintf(stdout, "url: %s\n", runtimeURL)
 			fmt.Fprintf(stdout, "startup: %s\n", time.Since(startedAt).Round(time.Millisecond))
 			fmt.Fprintf(stdout, "log: %s\n", logPath)
@@ -158,8 +176,6 @@ func runtimeStart(stdout, stderr io.Writer) int {
 			return 0
 		}
 
-		// Signal 0 does not terminate the process. It asks the OS whether
-		// this process still exists and can be signaled.
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 			_ = cmd.Wait()
 			_ = os.Remove(statePath)
@@ -190,14 +206,56 @@ func runtimeStart(stdout, stderr io.Writer) int {
 	}
 }
 
-func runtimeStop(stdout, stderr io.Writer) int {
+func runtimeStatePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "could not determine home directory: %v\n", err)
-		return 1
+		return "", err
+	}
+	return filepath.Join(home, ".localctl", "runtime.json"), nil
+}
+
+func readRuntimeState() (runtimeState, error) {
+	path, err := runtimeStatePath()
+	if err != nil {
+		return runtimeState{}, err
 	}
 
-	statePath := filepath.Join(home, ".localctl", "runtime.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return runtimeState{}, err
+	}
+
+	var state runtimeState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return runtimeState{}, err
+	}
+
+	if state.ModelID == "" {
+		state.ModelID = filepath.Base(state.Model)
+	}
+
+	return state, nil
+}
+
+func inferenceModelID(baseURL string) string {
+	if baseURL != runtimeURL {
+		return modelID
+	}
+
+	state, err := readRuntimeState()
+	if err != nil || state.URL != baseURL || state.ModelID == "" {
+		return modelID
+	}
+
+	return state.ModelID
+}
+
+func runtimeStop(stdout, stderr io.Writer) int {
+	statePath, err := runtimeStatePath()
+	if err != nil {
+		fmt.Fprintf(stderr, "could not determine runtime state path: %v\n", err)
+		return 1
+	}
 
 	data, err := os.ReadFile(statePath)
 	if err != nil {
@@ -271,7 +329,7 @@ func runtimeStop(stdout, stderr io.Writer) int {
 		if err != nil {
 			_ = os.Remove(statePath)
 
-			fmt.Fprintf(stdout, "runtime stopped\n")
+			fmt.Fprintln(stdout, "runtime stopped")
 			fmt.Fprintf(stdout, "pid: %d\n", state.PID)
 
 			return 0
