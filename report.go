@@ -20,24 +20,24 @@ type categoryCharacterization struct {
 }
 
 type modelCharacterization struct {
-	SchemaVersion       int                        `json:"schema_version"`
-	GeneratedAt         time.Time                  `json:"generated_at"`
-	ModelID             string                     `json:"model_id"`
-	ModelName           string                     `json:"model_name"`
-	Runs                int                        `json:"runs"`
-	CanonicalRuns       int                        `json:"canonical_runs"`
-	PrivateRuns         int                        `json:"private_runs"`
-	SchemaVersions      map[int]int                `json:"schema_versions"`
-	Profiles            map[string]int             `json:"profiles"`
-	Experiments         int                        `json:"experiments"`
-	Categories          []categoryCharacterization `json:"categories"`
-	FailureKinds        map[string]int             `json:"failure_kinds"`
-	MedianElapsed       string                     `json:"median_elapsed"`
-	MedianGeneration    string                     `json:"median_generation"`
-	RuntimeRSSSamples   int                        `json:"runtime_rss_samples"`
-	MaxRuntimeRSSBytes  int64                      `json:"max_runtime_rss_bytes,omitempty"`
-	MachineMemoryBytes  int64                      `json:"machine_memory_bytes,omitempty"`
-	LatestRun           time.Time                  `json:"latest_run,omitempty"`
+	SchemaVersion      int                        `json:"schema_version"`
+	GeneratedAt        time.Time                  `json:"generated_at"`
+	ModelID            string                     `json:"model_id"`
+	ModelName          string                     `json:"model_name"`
+	Runs               int                        `json:"runs"`
+	CanonicalRuns      int                        `json:"canonical_runs"`
+	PrivateRuns        int                        `json:"private_runs"`
+	SchemaVersions     map[int]int                `json:"schema_versions"`
+	Profiles           map[string]int             `json:"profiles"`
+	Experiments        int                        `json:"experiments"`
+	Categories         []categoryCharacterization `json:"categories"`
+	FailureKinds       map[string]int             `json:"failure_kinds"`
+	MedianElapsed      string                     `json:"median_elapsed"`
+	MedianGeneration   string                     `json:"median_generation"`
+	RuntimeRSSSamples  int                        `json:"runtime_rss_samples"`
+	MaxRuntimeRSSBytes int64                      `json:"max_runtime_rss_bytes,omitempty"`
+	MachineMemoryBytes int64                      `json:"machine_memory_bytes,omitempty"`
+	LatestRun          time.Time                  `json:"latest_run,omitempty"`
 }
 
 func historicalModelRecords(reference string) (string, string, []runObservation, error) {
