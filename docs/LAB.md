@@ -1,6 +1,6 @@
 # LocalCTL Baseline Lab
 
-LocalCTL now has two surfaces:
+LocalCTL has two surfaces:
 
 ```text
 learner lab                 glass-box runtime
@@ -17,7 +17,52 @@ localctl judge ...
 localctl compare ...
 ```
 
-The lab surface makes local-model experimentation easy. The runtime surface remains available so the systems behavior is never hidden.
+The lab surface makes repeated local-model experimentation easy. The runtime surface remains available when the learner wants to inspect process/runtime mechanics directly.
+
+## Runtime behavior: keep the current model warm
+
+Lab commands use a sticky managed runtime.
+
+```text
+baseline granite
+    -> start Granite if needed
+    -> run exercises
+    -> KEEP Granite running
+
+exercise run ... granite
+    -> reuse the same Granite runtime
+
+baseline granite
+    -> reuse the same Granite runtime
+
+baseline ornith
+    -> stop Granite
+    -> start Ornith
+    -> run exercises
+    -> KEEP Ornith running
+```
+
+You do not need to manually stop a model before requesting another model from `exercise`, `try`, or `baseline`.
+
+A model switch is explicit in the output:
+
+```text
+runtime: switching granite-...gguf -> ornith-...gguf
+runtime stopped
+pid: ...
+runtime started
+pid: ...
+```
+
+If LocalCTL finds recorded runtime state but the runtime is no longer ready, the next lab command attempts to reconcile that state automatically before starting the requested model.
+
+Manual lifecycle control is still available when you deliberately want it:
+
+```bash
+./localctl runtime status
+./localctl runtime inspect
+./localctl runtime stop
+```
 
 ## First five commands
 
@@ -31,19 +76,23 @@ The lab surface makes local-model experimentation easy. The runtime surface rema
 
 `granite` is an example model reference. LocalCTL accepts a unique substring of a discovered GGUF artifact name, so references such as `granite`, `ministral`, or `ornith` work when they are unambiguous on the machine.
 
+`localctl models` marks the active managed model with `*` when one is ready.
+
 ## What a baseline run does
 
 `localctl baseline <model>`:
 
 1. discovers the requested GGUF artifact;
-2. starts a managed `llama-server` if one is not already running for that artifact;
-3. waits for runtime readiness;
-4. runs the core baseline exercise set;
-5. captures runtime measurements exposed by the completion response;
-6. evaluates deterministic exercises;
-7. marks subjective exercises as pending instead of inventing a score;
-8. persists every observation;
-9. stops the runtime if the baseline command started it.
+2. reuses the current managed runtime when it already has that artifact loaded;
+3. automatically switches runtimes when a different model is requested;
+4. reconciles stale managed state when possible;
+5. waits for runtime readiness when a runtime must be started;
+6. runs the selected exercise set;
+7. captures runtime measurements exposed by the completion response;
+8. evaluates deterministic exercises;
+9. marks subjective exercises as pending instead of inventing a score;
+10. persists every observation;
+11. leaves the selected runtime ready for the next lab command.
 
 The extended catalog is available with:
 
@@ -58,6 +107,27 @@ A category can be isolated with:
 ./localctl exercises coding
 ./localctl baseline granite --category=coding
 ```
+
+## Reading baseline output
+
+PASS rows stay compact:
+
+```text
+[ 1/18] exact-output-v1                 PASS     375ms
+```
+
+FAIL rows explain the failure and preserve the exact run for deeper inspection:
+
+```text
+[ 4/18] json-extraction-v1              FAIL     2.2s
+        why: response was not valid JSON: ...
+        got: "..."
+        saved: run_...
+```
+
+At the end, LocalCTL reports the overall pass rate, auto-scored pass rates by category, failed exercise IDs, and how to inspect the saved evidence.
+
+The compact display is for navigation. The evidence store remains authoritative.
 
 ## Exercise catalog
 
@@ -156,6 +226,8 @@ text was correct
 
 A freeform run is saved exactly like a baseline run, but its evaluation remains pending until judged.
 
+Because the runtime stays warm, several freeform prompts against the same model avoid repeated model startup cost.
+
 ## Judge a run
 
 ```bash
@@ -212,17 +284,19 @@ Unknown runtime metrics remain absent/zero rather than being fabricated.
 ./localctl show <run-id>
 ```
 
-`show` reconstructs the useful context: configuration, prompt, response, deterministic evaluation, and any later human judgment.
+`show` reconstructs configuration, prompt, response, deterministic evaluation detail, and any later human judgment.
 
 ## Compare models from saved evidence
 
-After running the same baseline against multiple models:
+After running comparable baselines:
 
 ```bash
 ./localctl baseline granite
 ./localctl baseline ministral
 ./localctl compare granite ministral
 ```
+
+The second baseline automatically switches the managed runtime.
 
 The comparison reports observed run counts, auto-scored pass rates, pending manual judgments, median latency, median generation throughput when available, and per-category auto-scored pass rates.
 
@@ -243,14 +317,15 @@ A useful first session is:
 2. localctl models
 3. localctl exercises
 4. localctl exercise show go-slice-alias-v1
-5. predict whether your chosen model will pass
+5. predict whether the chosen model will pass
 6. localctl exercise run go-slice-alias-v1 granite
-7. inspect the saved run
+7. run another exercise immediately; Granite is still warm
 8. localctl baseline granite
-9. repeat with a second model
+9. localctl baseline ministral (automatic switch)
 10. localctl compare granite ministral
 11. inspect failures instead of only reading the score
 12. judge a subjective coding/writing exercise
+13. localctl runtime stop when the lab session is actually finished
 ```
 
 The intended learning loop remains:
@@ -266,6 +341,8 @@ prediction
 ## What the baseline does not prove
 
 A high pass rate does not prove that a model is generally good at coding or reasoning.
+
+A low pass rate also needs investigation. Failure can come from wrong reasoning, instruction-following failure, output-format mismatch, truncation, or a weakness in the exercise itself. Inspect the saved response before turning a FAIL into a broad model claim.
 
 The current catalog is a starting measurement surface. It helps expose differences and generates comparable evidence. Over time, stronger workloads should be added where success can be checked by compilers, tests, schemas, or other external properties.
 
