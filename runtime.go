@@ -34,6 +34,31 @@ type chatResponse struct {
 		FinishReason string  `json:"finish_reason"`
 		Message      message `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+	Timings struct {
+		PromptN            int     `json:"prompt_n"`
+		PromptMS           float64 `json:"prompt_ms"`
+		PromptPerSecond    float64 `json:"prompt_per_second"`
+		PredictedN         int     `json:"predicted_n"`
+		PredictedMS        float64 `json:"predicted_ms"`
+		PredictedPerSecond float64 `json:"predicted_per_second"`
+	} `json:"timings"`
+}
+
+type inferenceOutcome struct {
+	Model              string
+	Content            string
+	FinishReason       string
+	PromptTokens       int
+	CompletionTokens   int
+	TotalTokens        int
+	PromptPerSecond    float64
+	GenerationPerSecond float64
+	Elapsed            time.Duration
 }
 
 type modelsResponse struct {
@@ -70,9 +95,9 @@ func runtimeStatus(baseURL string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
+func performInference(baseURL, requestedModel, prompt string) (inferenceOutcome, error) {
 	payload := chatRequest{
-		Model: modelID,
+		Model: requestedModel,
 		Messages: []message{
 			{
 				Role:    "user",
@@ -85,8 +110,7 @@ func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Fprintf(stderr, "could not encode request: %v\n", err)
-		return 1
+		return inferenceOutcome{}, fmt.Errorf("could not encode request: %w", err)
 	}
 
 	req, err := http.NewRequest(
@@ -95,40 +119,56 @@ func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		fmt.Fprintf(stderr, "could not create inference request: %v\n", err)
-		return 1
+		return inferenceOutcome{}, fmt.Errorf("could not create inference request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
+	startedAt := time.Now()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fmt.Fprintf(stderr, "inference request failed: %v\n", err)
-		return 1
+		return inferenceOutcome{}, fmt.Errorf("inference request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		fmt.Fprintf(stderr, "inference failed: HTTP %s\n", resp.Status)
-		return 1
+		return inferenceOutcome{}, fmt.Errorf("inference failed: HTTP %s", resp.Status)
 	}
 
 	var result chatResponse
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Fprintf(stderr, "could not decode inference response: %v\n", err)
-		return 1
+		return inferenceOutcome{}, fmt.Errorf("could not decode inference response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		fmt.Fprintln(stderr, "inference response contained no choices")
-		return 1
+		return inferenceOutcome{}, fmt.Errorf("inference response contained no choices")
 	}
 
 	choice := result.Choices[0]
 
-	fmt.Fprintln(stdout, choice.Message.Content)
-	fmt.Fprintf(stderr, "finish_reason: %s\n", choice.FinishReason)
+	return inferenceOutcome{
+		Model:               result.Model,
+		Content:             choice.Message.Content,
+		FinishReason:        choice.FinishReason,
+		PromptTokens:        result.Usage.PromptTokens,
+		CompletionTokens:    result.Usage.CompletionTokens,
+		TotalTokens:         result.Usage.TotalTokens,
+		PromptPerSecond:     result.Timings.PromptPerSecond,
+		GenerationPerSecond: result.Timings.PredictedPerSecond,
+		Elapsed:             time.Since(startedAt),
+	}, nil
+}
+
+func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
+	outcome, err := performInference(baseURL, inferenceModelID(baseURL), prompt)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, outcome.Content)
+	fmt.Fprintf(stderr, "finish_reason: %s\n", outcome.FinishReason)
 
 	return 0
 }
