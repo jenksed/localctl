@@ -27,10 +27,14 @@ func TestLearnerNextStep(t *testing.T) {
 }
 
 func TestCandidateInstalledUsesModelIdentity(t *testing.T) {
-	candidate := modelRadarCandidate{Name: "Qwen3.5-9B", Repository: "openresearchtools/Qwen3.5-9B-GGUF"}
 	models := []modelArtifact{{ID: "qwen3-5-9b-q4-k-m", Name: "Qwen3.5-9B-Q4_K_M.gguf"}}
-	if !candidateInstalled(candidate, models) {
-		t.Fatal("expected installed Qwen candidate to be recognized")
+	curated := modelRadarCandidate{Name: "Qwen3.5-9B", Repository: "openresearchtools/Qwen3.5-9B-GGUF"}
+	if !candidateInstalled(curated, models) {
+		t.Fatal("expected installed curated Qwen candidate to be recognized")
+	}
+	live := modelRadarCandidate{Name: "Qwen3.5-9B-GGUF", Repository: "somebody/Qwen3.5-9B-GGUF"}
+	if !candidateInstalled(live, models) {
+		t.Fatal("expected installed live repository candidate to be recognized despite GGUF suffix")
 	}
 }
 
