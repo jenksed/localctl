@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/**
+      - fix/**
   pull_request:
 
 jobs:
@@ -24,3 +25,10 @@ jobs:
 
       - name: Test
         run: go test -count=1 ./...
+
+      - name: Darwin arm64 compile check
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build ./...
