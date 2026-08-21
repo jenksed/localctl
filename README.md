@@ -10,321 +10,594 @@
           LOCAL MODEL CAPABILITY LAB
 ```
 
-**Local models are cheap to run. The hard part is knowing which ones you can actually trust with useful work. LocalCTL helps you find out.**
+```text
+╭──────────────────────────────────────────────────────────────────╮
+│  LocalCTL v0.4 — KNOW THE TERRITORY                             │
+│                                                                  │
+│  DISCOVER → TEST → VERIFY → MAP → RECOMMEND → REFRESH           │
+╰──────────────────────────────────────────────────────────────────╯
+```
 
-LocalCTL is a small Go CLI that turns local-model experimentation into durable evidence on the machine you actually use.
+**Your Mac already owns compute. LocalCTL helps you learn which AI work that compute can actually handle — with evidence instead of vibes.**
 
-It can:
+Local models are easy to download and cheap to run. The expensive part is uncertainty.
 
-- find GGUF models you already have through LM Studio;
-- start and reuse `llama-server` for you;
-- put models through coding, Linux, Docker, Kubernetes, reasoning, structured-output, writing, summarization, PR, Git, and troubleshooting workloads;
-- distinguish wrong answers from contract failures, empty output, invalid JSON, and runtime failures;
-- repeat uncertain tests to expose flaky behavior;
-- remember every inference and its evidence locally;
-- compare two models under the same controlled experiment;
-- show which parts of a model are well tested and which parts are still unknown;
-- let you try your own private diffs, logs, and technical material without pretending those runs are canonical benchmarks.
+Which model is actually useful for coding? Which one follows strict JSON contracts? Which one can reason through Linux or Docker failures? Which one only looked good once? Which evidence is six weeks old? Which model deserves a local-first workload, and which work still deserves a premium frontier model?
 
-The practical goal is not to prove that cloud or frontier models are unnecessary. They are extremely useful.
+LocalCTL turns those questions into repeatable experiments and an inspectable capability map.
 
-The goal is to answer a more useful question:
-
-> **Which work can the machine I already own handle locally, reliably enough that I do not need to spend premium model usage on it?**
-
-Use expensive intelligence where it earns its cost. Find the rest.
+> **This is not another benchmark leaderboard.**
+>
+> LocalCTL measures the exact models you have, on the machine you actually own, under explicit runtime conditions, and remembers the evidence that supports every derived capability claim.
 
 ---
 
-## The 30-second mental model
+## The payoff
 
-You have a Mac. You download local models. Some are surprisingly capable. Some look good in a model card and fall apart on your actual work. Some are excellent at one thing and bad at another.
-
-LocalCTL treats that as an experiment instead of a vibe:
+Without an evidence system, local-model decisions tend to sound like this:
 
 ```text
-MODEL
-  ↓
-RUN A BOUNDED WORKLOAD
-  ↓
-OBSERVE WHAT ACTUALLY HAPPENED
-  ↓
-SAVE THE EVIDENCE
-  ↓
-REPEAT / COMPARE / FIND THE GAPS
-  ↓
-BUILD A MAP OF WHAT IS ACTUALLY USEFUL
+"Granite felt pretty good."
+"That Qwen model is supposed to be strong at coding."
+"I think this one is faster."
+"Pretty sure it handled Docker logs last time."
 ```
 
-Every time you test a model, LocalCTL remembers what happened.
-
-Today, without evidence, you might say:
+LocalCTL is trying to get you to this instead:
 
 ```text
-"Granite seemed pretty good."
+"This exact GGUF, on this machine, under the default profile,
+has current comparable evidence for developer-core and structured-output.
+Its Linux evidence is promising but incomplete.
+Its Kubernetes evidence is stale.
+Here are the exact run IDs behind those claims."
 ```
 
-After enough LocalCTL runs, you can say something bounded and inspectable instead:
+That changes the local-AI question from:
 
-```text
-"On this machine and profile, Granite has repeated evidence for
-these workloads, these failure patterns, and this observed speed.
-These other workloads are still under-tested."
-```
+> **Can I run a model?**
 
-That is a much better basis for deciding what should stay local, what still needs human review, and what still deserves a frontier model.
+into:
+
+> **What has this model actually demonstrated, how current is that evidence, and where is it rational to use next?**
+
+That is the wedge.
 
 ---
 
-# Quick start
+# Start in 60 seconds
 
-LocalCTL v0.3 is currently built for the development environment used by this project: macOS on Apple Silicon, Homebrew `llama-server`, and GGUF models under LM Studio's model directory.
+LocalCTL currently targets macOS on Apple Silicon with Homebrew `llama.cpp` and GGUF models stored under LM Studio's model directory.
 
-You need Go and `llama-server` available first.
-
-From the repository:
+From the repo:
 
 ```bash
 go build -o localctl .
-```
 
-Then ask the lab what it can see:
-
-```bash
 ./localctl check
 ./localctl models
-./localctl lab
 ```
 
-`localctl lab` is the learner-facing front door. It shows the machine, discovered models, accumulated evidence, managed runtime state, and the next useful commands.
-
-## The coolest first thing to try
-
-Pick one model name from:
-
-```bash
-./localctl models
-```
-
-Then audition it:
+Pick one discovered model reference and audition it:
 
 ```bash
 ./localctl audition granite
 ```
 
-The audition:
-
-1. checks whether the runtime/model can be used under the selected profile;
-2. runs the 18-test core baseline;
-3. samples useful capability areas;
-4. spends additional tests where the early signal is mixed or weak;
-5. points out failures worth repeatability testing;
-6. leaves behind a historical characterization you can inspect later.
-
-The runtime stays warm. Repeated work against the same model/profile reuses it instead of constantly stopping and starting it.
-
-If you request another model, LocalCTL switches automatically.
-
-## Put two models head-to-head
-
-If you already have two models, this is the fastest way to make the project feel real:
+Then ask LocalCTL what the accumulated evidence supports:
 
 ```bash
-./localctl headtohead granite ministral
+./localctl capability granite
 ```
 
-Or choose a deeper workload pack:
+See the whole local fleet:
 
 ```bash
-./localctl headtohead granite ministral --pack=linux-investigation
+./localctl matrix
 ```
 
-The two sides run in one LocalCTL session with the same machine, pack version, and requested profile. That is intentionally different from casually comparing unrelated historical runs.
+Ask a practical workload-placement question:
 
-The command finishes with a controlled comparison of observed pass rate, manual-review count, latency, and generation throughput where available.
+```bash
+./localctl recommend developer-core
+```
 
-It still does **not** claim a universal winner. It tells you what happened on the workload you actually tested.
+And find out what needs fresh evidence next:
+
+```bash
+./localctl requalify granite
+```
+
+That is the v0.4 loop:
+
+```text
+      ┌──────────┐
+      │ DISCOVER │
+      └────┬─────┘
+           ▼
+      ┌──────────┐
+      │   TEST   │
+      └────┬─────┘
+           ▼
+      ┌──────────┐
+      │  VERIFY  │
+      └────┬─────┘
+           ▼
+      ┌──────────┐
+      │   MAP    │
+      └────┬─────┘
+           ▼
+      ┌──────────┐
+      │ RECOMMEND│
+      └────┬─────┘
+           ▼
+      ┌──────────┐
+      │ REFRESH  │
+      └────┴─────┘
+           ▲
+           └──────── evidence keeps accumulating
+```
 
 ---
 
-# What does it look like?
+# What changed in v0.4
 
-The exact values depend on your machine and model. The structure below comes from the native v0.3 command paths; dynamic IDs, timings, and scores are intentionally shown as placeholders rather than invented measurements.
+v0.3 made LocalCTL a durable experiment workbench.
 
-```text
-$ ./localctl audition granite
+v0.4 gives that evidence a deterministic intelligence layer.
 
-LocalCTL model audition
-model: granite-...gguf
-profile: default
+| | v0.3 — Find the Edges | v0.4 — Know the Territory |
+| --- | --- | --- |
+| Core question | What happened? | What does the accumulated evidence support now? |
+| Unit | run / experiment | capability assessment |
+| Identity | model + artifact + runtime + profile + machine | same boundary, enforced for comparison |
+| Memory | durable observations | durable derived capability snapshots |
+| Repeatability | `verify` | contributes to evidence strength |
+| Comparison | controlled `headtohead` | fleet-wide `matrix` and workload `recommend` |
+| Time | observation timestamp | explicit `CURRENT` / `AGING` / `STALE` |
+| Gaps | `gaps` | `requalify` turns gaps/freshness into a next-test plan |
+| Authority | none | still none |
 
-Stage 1/5 — runtime fit
-runtime: reusing ... with profile default (PID ...)
-artifact: sha256:...
-runtime: warm managed runtime reused
-session: session_...
-experiment: exp_...
+The key change is not a prettier score.
 
-Stage 2/5 — core contracts
-[  1/ 18] exact-output-v1                    PASS     ...
-[  2/ 18] lowercase-only-v1                  PASS     ...
-...
-
-Stage 3/5 — adaptive capability probes
-...
-
-Stage 4/5 — repeatability candidates
-suggested verify: localctl verify ...
-
-Stage 5/5 — early characterization
-...
-
-What this supports: an early bounded capability map for this exact model/profile/machine.
-What this does not prove: general production reliability, safe autonomy, or capability outside tested workloads.
-```
-
-A failed deterministic task also records *how* it failed when LocalCTL can tell:
+It is this:
 
 ```text
-contract_extra_output
-incorrect_answer
-empty_output
-invalid_json
-structured_mismatch
-missing_required_concepts
-inference_error
+RAW EVIDENCE
+    │
+    ▼
+DETERMINISTIC DERIVATION
+    │
+    ▼
+TRACEABLE CAPABILITY CLAIM
 ```
 
-That matters. A model that knows the right answer but refuses to follow an exact-output contract has a different problem from a model that confidently reasons to the wrong answer.
+Every persisted v0.4 capability snapshot records both the **rule version** and the exact **source run IDs** behind each pack assessment.
+
+No AI grades its own homework.
 
 ---
 
-# Why would I use this?
+# The five commands that make v0.4 click
 
-### “I want to use local models for coding.”
-
-Start with:
+## 1. `audition` — find the edges
 
 ```bash
-./localctl mission run developer granite
+./localctl audition granite
 ```
 
-Or inspect the underlying versioned pack:
+An audition does more than send one prompt. It runs a bounded characterization session across core contracts and adaptive capability probes while preserving run evidence.
+
+Use it when you have a model and your first question is simply:
+
+> What kind of thing might this model be good for?
+
+An audition can produce early evidence. It cannot produce universal trust.
+
+---
+
+## 2. `capability` — turn matching evidence into a map
 
 ```bash
-./localctl pack show developer-core
-./localctl pack run developer-core granite
+./localctl capability granite
 ```
 
-The developer surface includes coding semantics, bug triage, diff/PR reasoning, commit-message work, test planning, structured output, and technical writing.
+The capability map asks a stricter question:
 
-### “Could a small model actually help with Linux troubleshooting?”
+> Which historical runs are actually comparable to the model, artifact, profile, pack version, and machine I am asking about right now?
 
-```bash
-./localctl pack run linux-investigation granite
-```
+Then it derives:
 
-The infrastructure catalog contains 100 scenarios across:
+- evidence strength;
+- freshness;
+- capability state;
+- deterministic exercise coverage;
+- pass/fail shape;
+- runtime reliability;
+- pending human review;
+- candidate roles;
+- excluded historical evidence;
+- exact source run provenance.
+
+The result is also persisted separately under:
 
 ```text
-Linux        34
-Docker       33
-Kubernetes   33
-----------------
-Total       100
+~/.localctl/intelligence/capability/YYYY/MM/DD/
 ```
 
-They emphasize investigation boundaries—processes, sockets, storage, resource pressure, container/runtime behavior, probes, scheduling, Services, RBAC, networking, rollouts, and evidence-first triage—not just certification trivia.
+That separation matters:
 
-### “I downloaded five models and have no idea which one matters.”
+```text
+observation.json                 derived capability snapshot
+---------------                  ---------------------------
+what happened                    what the rules infer from it
+immutable source evidence        regenerable derived knowledge
+schema v3                        capability schema v1
+                                 rule_version: v1
+                                 source_run_ids: [...]
+```
 
-Use a fast controlled comparison:
+---
+
+## 3. `matrix` — see your local fleet
 
 ```bash
-./localctl headtohead granite ministral
+./localctl matrix
 ```
 
-Then inspect each accumulated history:
+The matrix compresses your installed models into a capability-oriented view.
+
+Conceptually it looks like this:
+
+```text
+ILLUSTRATIVE SHAPE ONLY — THESE ARE NOT MEASURED RESULTS
+
+MODEL                    DEV        LINUX      DOCKER     K8S        WRITING    STRUCT     REASON
+model-a                  SUPPORTED  PROMISING  MIXED      ?          SUPPORTED  STRONG     MIXED
+model-b                  MIXED      SUPPORTED  SUPPORTED  PROMISING  PROMISING  SUPPORTED  STRONG
+model-c                  ?          ?          ?          ?          MIXED      PROMISING  PROMISING
+```
+
+Your actual output is generated from your own LocalCTL evidence corpus.
+
+The matrix is not asking “which model wins?”
+
+It is asking:
+
+> **Where does each model currently have evidence?**
+
+That is much more useful for local-first workload placement.
+
+---
+
+## 4. `recommend` — ask where a workload should go
 
 ```bash
-./localctl report granite
-./localctl report ministral
+./localctl recommend developer-core
+./localctl recommend linux-investigation
+./localctl recommend structured-output --profile=fast
 ```
 
-### “I don't want to burn premium AI usage on simple work.”
+`recommend` ranks **installed** models using only comparable current evidence for the requested pack/profile/machine/artifact boundary.
 
-Run the local-first mission:
+It uses a visible lexicographic order:
+
+```text
+capability state
+    ↓
+evidence strength
+    ↓
+pass rate
+    ↓
+coverage
+    ↓
+stable name tie-breaker
+```
+
+There is no hidden “AI quality = 87.3” magic score.
+
+If the leader reaches `SUPPORTED` or `STRONG`, LocalCTL may call it the **evidence leader** for that comparison set.
+
+That means:
+
+> Among the installed models LocalCTL can responsibly compare here, this one currently has the strongest bounded evidence.
+
+It does **not** mean:
+
+- best model in the world;
+- safe autonomous agent;
+- correct on unseen work;
+- permanent winner;
+- authorized to execute anything.
+
+Recommendation is decision support, not authority.
+
+---
+
+## 5. `requalify` — stop stale knowledge from becoming folklore
 
 ```bash
-./localctl mission run local-first granite
+./localctl requalify granite
 ```
 
-That samples bounded high-frequency work such as structured output, developer tasks, summarization, and reasoning.
+A capability claim should age.
 
-It does **not** declare that a local model can replace a frontier model. It gives you evidence about where substitution might be rational to investigate.
+v0.4 makes that explicit:
 
-### “I saw a new GGUF and everybody says it is amazing.”
+```text
+0–14 days      CURRENT
+15–45 days     AGING
+46+ days       STALE
+```
 
-Start with:
+These are versioned LocalCTL heuristics, not laws of machine learning.
+
+The important part is that “we tested this once a while ago” no longer silently means “we know this now.”
+
+`requalify` produces a deterministic next-test plan based on stale, unknown, unreliable, weak, mixed, or aging evidence.
+
+By default it changes nothing:
 
 ```bash
-./localctl explore
-./localctl explore --live
+./localctl requalify granite
 ```
 
-Then install one sensible quant, confirm LocalCTL sees it:
+If you explicitly ask it to execute:
 
 ```bash
-./localctl models
+./localctl requalify granite --run
 ```
 
-and audition it:
+it runs only the single highest-priority pack from the plan.
 
-```bash
-./localctl audition <model-reference>
+Bounded on purpose.
+
+---
+
+# Read the capability states like an operator
+
+v0.4 has three different dimensions. Do not collapse them into one grade.
+
+## Evidence strength
+
+How much comparable deterministic evidence exists?
+
+```text
+NONE
+  ↓
+EARLY
+  ↓
+DEVELOPING
+  ↓
+SUPPORTED
+  ↓
+STRONG
 ```
 
-The point is to move from hype to observed behavior quickly.
+`HUMAN_ONLY` is a separate signal for evidence that exists but is not deterministically scored.
 
-### “I want to try my actual work.”
+## Freshness
+
+How recent is the newest comparable evidence?
+
+```text
+CURRENT   0–14 days
+AGING     15–45 days
+STALE     >45 days
+UNKNOWN   no comparable evidence
+```
+
+## Capability state
+
+What does the combination responsibly support?
+
+| State | Plain-language reading |
+| --- | --- |
+| `UNKNOWN` | LocalCTL does not have comparable evidence yet. |
+| `PROMISING` | Positive signal exists, but support is still early/developing. |
+| `MIXED` | The model passes some deterministic work and fails enough to matter. |
+| `WEAK` | Current deterministic pass evidence is below the v1 support floor. |
+| `RUNTIME_UNRELIABLE` | Too many comparable inference attempts failed at the runtime boundary. |
+| `REVIEW_REQUIRED` | Evidence is primarily manual and still needs human judgment. |
+| `SUPPORTED` | Current comparable evidence clears the bounded v1 support rules. |
+| `STRONG` | Current, broad, repeated deterministic evidence plus high pass rate. |
+| `STALE` | The newest comparable evidence is too old under the current rule. |
+
+None of these states means “authorized.”
+
+---
+
+# Why LocalCTL excludes some of your own history
+
+This is a feature.
+
+Suppose you have 40 old runs for “Granite.” Some used a different GGUF. Some used `fast`; some used `long-context`. The Linux pack changed. A few runs were from private incident logs. Some were produced before schema v3 recorded enough provenance.
+
+A naive benchmark tool might throw all 40 into an average.
+
+LocalCTL v0.4 asks whether each run belongs in the claim you are making now.
+
+For canonical capability promotion, the v1 boundary requires:
+
+```text
+schema v3+
+AND canonical input
+AND exact pack ID
+AND exact pack version
+AND exact profile
+AND comparable machine fingerprint
+AND exact installed artifact SHA-256 when available
+```
+
+Anything else is counted as excluded evidence instead of quietly contaminating the result.
+
+That is why a smaller number of clean runs can be more valuable than a larger pile of vaguely related history.
+
+---
+
+# Real work still matters
+
+Canonical exercises are useful because they are comparable.
+
+Real work is useful because it is real.
+
+LocalCTL keeps both without pretending they are the same thing.
 
 Pipe private material into a bounded work template:
 
 ```bash
 git diff | ./localctl work pr-review granite
-```
 
-```bash
 cat incident.log | ./localctl work linux-triage granite
+
+cat docker-debug.txt | ./localctl work docker-triage granite
+
+cat k8s-events.txt | ./localctl work kubernetes-triage granite
+
+cat notes.md | ./localctl work summarize granite
 ```
+
+Those runs are stored as `private` evidence and can be judged by a human:
 
 ```bash
-kubectl describe pod my-pod | ./localctl work kubernetes-triage granite
+./localctl judge <run-id> good "useful and grounded"
+./localctl judge <run-id> partial "right diagnosis, weak next step"
+./localctl judge <run-id> bad "invented a fact not present in the input"
 ```
 
-Real-work inputs are explicitly marked `private` and `non-canonical` in the v0.3 evidence model. They are useful for learning whether benchmark behavior transfers to your work without mixing those inputs into canonical pack identity.
+But v0.4 does not let uncontrolled private work silently inflate canonical capability state.
 
-The v0.3 input limit for `work` is 2 MiB.
+```text
+PRIVATE REAL WORK
+      │
+      ├── durable evidence      yes
+      ├── human judgment        yes
+      └── canonical promotion   no
+```
+
+That boundary is deliberate.
 
 ---
 
-# Repeatability: one pass is not reliability
+# Local-first does not mean cloud-hostile
 
-LLMs are probabilistic systems. Even with temperature zero, runtime/model behavior can vary.
+The goal is not “never pay for AI again.”
 
-If an exercise matters, verify it:
+The goal is to stop paying premium intelligence prices for work your own machine has already demonstrated it can handle well enough.
+
+Think in workload classes:
+
+```text
+                         NEEDS FRONTIER / PREMIUM
+                                  ▲
+                                  │
+      novel architecture ─────────┤
+      ambiguous high-risk work ───┤
+      difficult synthesis ─────────┤
+                                  │
+──────────────────────────────────┼─────────────────────────────
+                                  │
+      formatting / extraction ─────┤
+      bounded summaries ────────────┤
+      routine code explanation ─────┤
+      known ops investigation ───────┤
+                                  │
+                                  ▼
+                          PLAUSIBLY LOCAL
+```
+
+The line is not fixed.
+
+LocalCTL exists to move that line using evidence from **your** hardware and **your** models.
+
+A frontier model may still be the correct choice. LocalCTL just makes “because I never checked whether local was enough” a weaker reason.
+
+---
+
+# Capability packs: test the work, not the reputation
+
+v0.4 reasons over versioned capability packs.
+
+List them:
+
+```bash
+./localctl packs
+```
+
+Current pack families include:
+
+| Pack | What it probes |
+| --- | --- |
+| `core-baseline` | fast cross-capability smoke test |
+| `developer-core` | coding semantics, commits, diffs, PRs, regression thinking, bug triage |
+| `linux-investigation` | processes, filesystems, networking, resources, services, incident reasoning |
+| `docker-investigation` | lifecycle, images, storage, networking, builds, troubleshooting |
+| `kubernetes-investigation` | workloads, scheduling, services, probes, storage, RBAC, networking, rollouts |
+| `writing-summarization` | faithful summaries, concise rewriting, technical explanation |
+| `structured-output` | strict output contracts, JSON, extraction, classification |
+| `reasoning-analysis` | constraints, uncertainty, grounding, contradiction, evidence distinctions |
+
+Inspect one:
+
+```bash
+./localctl pack show developer-core
+```
+
+Run it directly:
+
+```bash
+./localctl pack run developer-core granite
+```
+
+A pack has a version because the test definition is part of the evidence identity.
+
+```text
+"passed developer-core"
+```
+
+is incomplete.
+
+```text
+"passed developer-core/v1 under this profile and artifact"
+```
+
+is a claim LocalCTL can reason about later.
+
+---
+
+# Want a fair two-model fight?
+
+Use `headtohead` instead of eyeballing unrelated history.
+
+```bash
+./localctl headtohead granite ministral
+```
+
+The important part is not the word “versus.”
+
+It is that LocalCTL deliberately creates a comparison session under the same machine, capability pack, and profile rather than pretending two arbitrary piles of runs are controlled.
+
+For deeper historical shape afterward:
+
+```bash
+./localctl capability granite
+./localctl capability ministral
+./localctl matrix
+```
+
+---
+
+# Repeatability before confidence
+
+A model can get an answer right once by chance, prompt sensitivity, or ordinary probabilistic variation.
+
+Use:
 
 ```bash
 ./localctl verify go-slice-alias-v1 granite
 ```
 
-Or sample deterministic exercises from a category:
-
-```bash
-./localctl verify linux granite --runs=7
-```
-
-LocalCTL reports repeatability using deliberately plain labels:
+Repeatability labels include:
 
 ```text
 STABLE_PASS
@@ -335,27 +608,137 @@ STABLE_FAIL
 UNKNOWN
 ```
 
-Verification stops early after three identical deterministic outcomes when the evidence is already one-sided, rather than mindlessly burning cycles.
+The repeatability evidence flows into the same durable run history that v0.4 later derives capability state from.
 
-This distinction is central to the project:
+One success is an observation.
+
+Repeated evidence is a pattern.
+
+Neither is automatic authority.
+
+---
+
+# The intelligence layer can be audited too
+
+Raw evidence has its own integrity checks:
+
+```bash
+./localctl evidence audit
+```
+
+v0.4 adds a separate audit for derived knowledge:
+
+```bash
+./localctl intelligence list
+./localctl intelligence show <snapshot-id>
+./localctl intelligence audit
+```
+
+A derived capability snapshot contains:
 
 ```text
-passed once != reliable
+rule_version
+model identity
+artifact SHA-256 when available
+profile
+machine fingerprint
+pack assessments
+source_run_ids[]
+```
+
+`intelligence audit` checks that the derivation retains its source chain.
+
+This means a future system can ask:
+
+> Why does LocalCTL currently say this model is supported for developer work?
+
+and trace the answer back through:
+
+```text
+CAPABILITY SNAPSHOT
+       │
+       ├── rules: v1
+       │
+       └── source_run_ids
+                │
+                ▼
+         OBSERVATION FILES
+                │
+                ▼
+       PROMPTS / RESPONSES / TELEMETRY
+```
+
+That is the foundation for a trustworthy analyst layer later.
+
+---
+
+# Evidence lives on disk, not in a vibe cache
+
+Raw run evidence:
+
+```text
+~/.localctl/runs/
+└── YYYY/
+    └── MM/
+        └── DD/
+            └── run_.../
+                ├── observation.json
+                ├── prompt.txt
+                ├── response.txt
+                └── judgment.json      # when a human judges it
+```
+
+Derived capability intelligence:
+
+```text
+~/.localctl/intelligence/
+└── capability/
+    └── YYYY/
+        └── MM/
+            └── DD/
+                └── cap_...json
+```
+
+List recent raw runs:
+
+```bash
+./localctl runs
+```
+
+Inspect one:
+
+```bash
+./localctl show <run-id>
+```
+
+Historical characterization remains available too:
+
+```bash
+./localctl report granite
+./localctl report granite --json
+./localctl gaps granite
+```
+
+The distinction is intentional:
+
+```text
+report       = historical characterization
+capability   = current strict comparable-evidence derivation
+matrix       = current fleet projection
+recommend    = advisory workload comparison
 ```
 
 ---
 
-# Profiles: test models *and* configurations
+# Profiles are part of the claim
 
-A model name alone is not a complete experiment.
-
-LocalCTL v0.3 introduces runtime profiles:
+List profiles:
 
 ```bash
 ./localctl profiles
 ```
 
-Built-in profiles currently include:
+Built-ins currently include:
 
 ```text
 default       context 2048   temperature 0   max tokens 512
@@ -363,496 +746,367 @@ fast          context 2048   temperature 0   max tokens 256
 long-context  context 8192   temperature 0   max tokens 1024
 ```
 
-Run an audition under another profile:
+Use one explicitly:
 
 ```bash
-./localctl audition granite --profile=long-context
+./localctl audition granite --profile=fast
+./localctl capability granite --profile=fast
+./localctl matrix --profile=fast
+./localctl recommend structured-output --profile=fast
 ```
 
-Create a custom profile:
+Create your own:
 
 ```bash
-./localctl profile create my-4096 --context=4096 --max-tokens=768 --temperature=0
+./localctl profile create coding-long \
+  --context=8192 \
+  --max-tokens=1536 \
+  --temperature=0
 ```
 
-Then use it:
-
-```bash
-./localctl pack run developer-core granite --profile=my-4096
-```
-
-Changing the profile changes the runtime configuration. LocalCTL restarts the same model when necessary rather than silently pretending a different context/configuration is the same experiment.
+If a managed runtime is already running with a different profile, LocalCTL restarts it instead of silently pretending the experiment conditions stayed the same.
 
 ---
 
-# Versioned capability packs
+# The glass box is still there
 
-A benchmark only remains useful historically if you know what test definition produced the result.
-
-List the built-in packs:
-
-```bash
-./localctl packs
-```
-
-Current v0.3 packs include:
+The learner UX is intentionally simple. The underlying system remains inspectable.
 
 ```text
-core-baseline/v1
-developer-core/v1
-linux-investigation/v1
-docker-investigation/v1
-kubernetes-investigation/v1
-writing-summarization/v1
-structured-output/v1
-reasoning-analysis/v1
+shell
+  │
+  │ starts
+  ▼
+localctl executable / Go process
+  │
+  ├── process control
+  ├── evidence capture
+  ├── experiment grouping
+  └── deterministic capability derivation
+  │
+  │ HTTP
+  ▼
+llama-server process
+  │
+  │ contains llama.cpp inference runtime
+  ▼
+Metal
+  │
+  ▼
+Apple GPU / unified memory
+  ▲
+  │
+GGUF model artifact
 ```
 
-Inspect one:
+Important boundary:
+
+`llama-server` is the OS process. The llama.cpp inference machinery runs inside it; llama.cpp is not another child process underneath the server.
+
+Inspect the runtime directly:
 
 ```bash
-./localctl pack show kubernetes-investigation
+./localctl runtime status
+./localctl runtime inspect
+./localctl runtime infer "Reply exactly RUNTIME_OK"
+./localctl runtime stop
 ```
 
-Every pack declares what it is trying to measure and, just as importantly, what it does **not** prove.
-
-The old category-friendly command still works:
-
-```bash
-./localctl suite linux granite
-./localctl suite docker granite
-./localctl suite kubernetes granite
-```
-
-In v0.3 those suite runs are grouped as explicit experiments instead of appearing as an unrelated pile of historical observations.
+The higher-level commands automate lifecycle work, but the glass-box commands remain available because automation is easier to trust when you can inspect beneath it.
 
 ---
 
-# Missions: start from the question, not the taxonomy
+# What LocalCTL observes
 
-If you do not care what a “pack” is yet, use a mission:
+Depending on what `llama-server` exposes, a schema-v3 observation can include:
 
-```bash
-./localctl missions
+- run ID;
+- session ID;
+- experiment ID and kind;
+- exercise ID/version/category/difficulty;
+- capability pack ID/version;
+- canonical vs private input class;
+- machine OS/architecture/chip/memory;
+- LocalCTL build/version identity;
+- model ID/name/path/file size;
+- GGUF SHA-256;
+- quantization parsed from the artifact name when available;
+- runtime PID/executable/version;
+- profile identity;
+- requested context/temperature/max tokens;
+- observed managed-runtime context;
+- point-in-time `llama-server` process RSS when available;
+- prompt and response hashes;
+- finish reason;
+- token counts;
+- prompt and generation throughput;
+- client-observed elapsed time;
+- deterministic evaluation result;
+- failure classification;
+- validation authority.
+
+Missing telemetry stays missing. LocalCTL does not invent measurements to make reports look complete.
+
+One subtle example:
+
+```text
+runtime RSS != peak memory
+runtime RSS != total Metal memory
+runtime RSS != total unified-memory pressure
 ```
 
-Then:
-
-```bash
-./localctl mission run developer granite
-./localctl mission run ops granite
-./localctl mission run local-first granite
-```
-
-Missions are learner-oriented experiment plans composed from the same versioned packs. They do not create another hidden evaluator.
+If LocalCTL only observed process RSS at one point in time, that is what it calls it.
 
 ---
 
-# What LocalCTL learns over time
+# The proof ladder
 
-Every normal model-use surface saves evidence automatically.
-
-These create historical model observations:
+LocalCTL deliberately refuses to turn one successful call into a broad capability claim.
 
 ```text
-localctl audition ...
-localctl headtohead ...
-localctl pack run ...
-localctl suite ...
-localctl baseline ...
-localctl verify ...
-localctl exercise run ...
-localctl try ...
-localctl work ...
-localctl runtime infer ...    # when the runtime is LocalCTL-managed
+discovered
+    ↓
+loadable
+    ↓
+ready
+    ↓
+responsive
+    ↓
+contract compliant
+    ↓
+task capable
+    ↓
+repeatable
+    ↓
+evidence supported
+    ↓
+current
+    ↓
+candidate for a bounded role
 ```
 
-These inspect or organize existing evidence and do not create inference observations by themselves:
+Even that last step is still not execution authority.
+
+Some distinctions LocalCTL tries hard not to blur:
 
 ```text
-localctl lab
-localctl models
-localctl explore
-localctl profiles
-localctl packs
-localctl experiments
-localctl report
-localctl gaps
-localctl runs
-localctl show
-localctl compare
-localctl insights
-localctl evidence audit
+installed != running
+running != ready
+ready != reachable
+reachable != responsive
+responsive != inference succeeded
+inference succeeded != contract followed
+contract followed once != reliable
+artifact exists != model loaded
+requested config != observed config
+observation != inference
+inference != qualification
+qualification != selection
+recommendation != authority
+capability != authority
 ```
 
-## Characterize a model
-
-```bash
-./localctl report granite
-```
-
-The report summarizes:
-
-- total, canonical, and private runs;
-- experiment count;
-- category coverage;
-- deterministic pass/fail observations;
-- pending human-review work;
-- failure kinds;
-- median inference latency;
-- median reported generation throughput;
-- observed runtime RSS samples where available;
-- evidence schema history;
-- profiles represented in the corpus.
-
-Machine-readable output is available for the later capability-intelligence layers:
-
-```bash
-./localctl report granite --json
-```
-
-## Find what we still do not know
-
-```bash
-./localctl gaps granite
-```
-
-`gaps` is deliberately deterministic in v0.3. It looks for under-tested capability packs and recommends a high-information next experiment based on coverage.
-
-No LLM is interpreting its own test results here.
-
-## Audit the history itself
-
-```bash
-./localctl evidence audit
-```
-
-A healthy corpus ends with:
-
-```text
-history status: COMPLETE
-```
-
-The audit verifies run files against the derivative index and, for schema-v3 observations, checks that the provenance fields v0.4/v0.5 will depend on are actually present.
-
-If the NDJSON index is lost or damaged:
-
-```bash
-./localctl evidence rebuild-index
-```
-
-The index is rebuilt from authoritative observation files. LocalCTL does not rewrite old observations to make them look newer or more complete than they were.
+Those are not philosophical slogans. They determine what the code is allowed to claim.
 
 ---
 
-# Where is the evidence?
+# No AI grades its own homework
 
-Ask LocalCTL:
+v0.4 capability intelligence is deliberately deterministic.
+
+The model does not look at its own run history and decide:
+
+```text
+"I am 92% qualified for Docker."
+```
+
+LocalCTL derives state from inspectable rules over recorded evidence.
+
+A future AI analyst may be useful for questions like:
+
+- Why does model A appear stronger than model B for this workload?
+- What failure patterns keep repeating?
+- Which new experiment would discriminate between two hypotheses?
+- What does this capability map imply for my actual development workflow?
+
+But when that layer arrives, its analysis should have separate provenance.
+
+The deterministic map remains the map.
+
+The analyst interprets the map.
+
+---
+
+# The road from experiments to a local-model operating system
+
+```text
+v0.1 / v0.2
+  runtime truth + durable exercise evidence
+        │
+        ▼
+v0.3 — FIND THE EDGES
+  sessions
+  experiments
+  profiles
+  capability packs
+  repeatability
+  private real work
+  evidence schema v3
+        │
+        ▼
+v0.4 — KNOW THE TERRITORY
+  strict comparability
+  evidence strength
+  freshness
+  capability state
+  candidate roles
+  fleet matrix
+  advisory recommendations
+  requalification
+  derived-intelligence provenance
+        │
+        ▼
+v0.5 — ANALYZE THE TERRITORY     future
+  bounded AI analyst
+  evidence synthesis
+  comparative explanations
+  uncertainty narration
+        │
+        ▼
+later
+  explicit qualification / eligibility / selection
+  only after the evidence model earns it
+```
+
+The architecture can become sophisticated later without making the truth layer vague now.
+
+---
+
+# What LocalCTL will not do in v0.4
+
+LocalCTL does **not** currently:
+
+- automatically route your real work to a model;
+- grant `DELEGATE`, `ASSIST`, or autonomous execution authority;
+- let an LLM assign its own capability state;
+- run arbitrary model-generated code on the host;
+- mutate your repo because a model passed a coding pack;
+- claim benchmark success equals production qualification;
+- mix private real-work evidence into canonical scores;
+- claim published GGUF size equals actual runtime memory use;
+- claim one machine's results universally describe another machine;
+- claim local models eliminate the need for frontier models;
+- hide stale or incompatible evidence just to preserve a nice score.
+
+Those omissions are part of the design.
+
+---
+
+# A practical learning session
+
+If you want to learn the system rather than merely run it, use this sequence:
 
 ```bash
-./localctl evidence path
+./localctl check
+./localctl models
 ```
 
-By default, runs live under:
+Pick a model.
 
-```text
-~/.localctl/runs/YYYY/MM/DD/<run-id>/
+Before running anything, predict what you think it will be good at.
+
+```bash
+./localctl audition granite
 ```
 
-A successful run contains:
-
-```text
-observation.json
-prompt.txt
-response.txt
-```
-
-A later human judgment is separate:
-
-```text
-judgment.json
-```
-
-Experiments and sessions are also persisted separately under `~/.localctl/`.
-
-The important idea comes first:
-
-> **The answer can be reinterpreted later. What happened during the run should not be rewritten.**
-
----
-
-# Evidence schema v3
-
-You do not need to understand this section to use the lab.
-
-For people who do care about provenance, new v0.3 observations can include:
-
-```text
-run / session / experiment identity
-exercise version
-pack ID + version
-canonical vs private input class
-prompt SHA-256
-machine OS / architecture / memory / available chip identity
-LocalCTL version + VCS build identity when available
-model path / size / SHA-256 / quantization parsed from artifact name
-llama-server process / executable / version metadata when observable
-runtime profile
-requested and observed context identity
-inference status / finish reason
-token counts when llama.cpp reports them
-elapsed time
-prompt and generation throughput when reported
-response SHA-256
-visible-output diagnostics
-point-in-time llama-server RSS when the OS exposes it
-validation authority
-evaluation result and failure classification
-```
-
-Unknown values stay unknown.
-
-A point-in-time process RSS sample is **not** labeled peak memory or total Apple unified-memory/Metal usage. The distinction is intentional.
-
-Older v1/v2 observations remain readable historical evidence. LocalCTL does not rewrite them to invent model hashes, failure causes, machine identities, or other facts that were not recorded at the time.
-
----
-
-# Human judgment stays human
-
-Some tasks can be evaluated mechanically:
-
-```text
-exact output
-required concepts
-semantic JSON equality
-```
-
-Other tasks—PR reviews, technical summaries, investigation plans, support writing—are not honestly reducible to one deterministic string comparison.
-
-Those runs are saved as `pending`.
-
-Judge them explicitly:
+Then inspect what was saved:
 
 ```bash
 ./localctl runs
 ./localctl show <run-id>
-./localctl judge <run-id> good "accurate and useful"
-./localctl judge <run-id> partial "useful but missed an important edge"
-./localctl judge <run-id> bad "confident claim contradicted the evidence"
 ```
 
-Human judgment is stored separately from the original observation.
+Now derive the map:
 
-```text
-observation != judgment
+```bash
+./localctl capability granite
 ```
+
+Inspect the derivation:
+
+```bash
+./localctl intelligence list
+./localctl intelligence show <snapshot-id>
+```
+
+Find the weakest knowledge:
+
+```bash
+./localctl requalify granite
+```
+
+Compare the fleet:
+
+```bash
+./localctl matrix
+./localctl recommend developer-core
+```
+
+Then ask yourself:
+
+1. Which claims are observations?
+2. Which claims are deterministic derivations?
+3. Which runs were excluded from the capability map?
+4. What changed because of freshness?
+5. Would the recommendation change under `fast`?
+6. What evidence would have to exist before you would trust the local model with more consequential work?
+
+That is the learning loop LocalCTL is built to make cheap.
 
 ---
 
-# Historical compare vs controlled head-to-head
+# Command deck
 
-Two comparison modes exist for different purposes.
-
-## Controlled experiment
-
-Prefer this when you want to learn which of two models performs better *now* under one bounded setup:
-
-```bash
-./localctl headtohead granite ministral
-```
-
-This intentionally shares the same LocalCTL session, machine, pack version, and requested profile.
-
-## Historical roll-up
-
-Use this to look across everything you have previously saved:
-
-```bash
-./localctl compare granite ministral
-```
-
-Historical evidence may contain different dates, profiles, pack mixes, and older schema versions. It is valuable history, but it is not automatically a controlled benchmark.
-
-That distinction is one of the reasons v0.3 introduces sessions, experiments, profiles, and versioned packs.
-
----
-
-# Explore newer models
-
-Show the curated local radar:
-
-```bash
-./localctl explore
-```
-
-Show recently updated GGUF repositories for investigation:
-
-```bash
-./localctl explore --live
-```
-
-The live surface is discovery, not recommendation:
+## Front door
 
 ```text
-new != good
-GGUF exists != current llama.cpp compatibility proven
-file fits on disk != model fits comfortably in memory
-model loads != model is useful
-one successful task != reliable capability
-```
-
-The intended loop is:
-
-```text
-discover
-  ↓
-install one sensible quant
-  ↓
-localctl models
-  ↓
-localctl audition <model>
-  ↓
-verify interesting edges
-  ↓
-head-to-head against what you already have
-  ↓
-keep / specialize / reject / investigate further
-```
-
----
-
-# A few terms, in practical language
-
-### GGUF
-
-A model file format used by `llama.cpp`. If you have downloaded models through LM Studio, you may already have GGUF files on your machine.
-
-### llama.cpp
-
-The local inference runtime project doing the low-level model work here.
-
-### llama-server
-
-A server executable built from the llama.cpp project. LocalCTL starts it as a separate OS process and talks to it over HTTP.
-
-### inference
-
-Asking the loaded model to produce an output from an input prompt.
-
-### token / tokens per second
-
-Models read and generate text in tokens rather than directly in words. Generation tokens/second is one useful performance observation, but it is not a quality score.
-
-### context
-
-The amount of tokenized input/history the runtime is configured to make available to a request. Bigger context can require substantially more memory.
-
-### profile
-
-LocalCTL's named runtime/request configuration, such as context size and output limit.
-
-### model artifact
-
-The exact GGUF file, not merely a family name like “Qwen.” v0.3 content-hashes the artifact so later evidence can distinguish files more reliably.
-
-### deterministic evaluation
-
-A machine-checkable rule such as exact output or semantic JSON equality.
-
-### human judgment
-
-An explicit human assessment for work whose quality cannot be honestly reduced to the deterministic evaluator.
-
----
-
-# Glass-box runtime
-
-The easy workflow does not hide the actual system.
-
-```text
-shell / learner
-      │
-      ▼
-localctl Go process
-      │
-      │ process control + HTTP
-      ▼
-llama-server process
-      │
-      ▼
-llama.cpp runtime
-      │
-      ▼
-Metal / Apple Silicon
-      │
-      ▼
-GGUF model data
-```
-
-Important distinctions:
-
-```text
-localctl process != llama-server process
-process started != runtime ready
-runtime ready != inference succeeded
-inference succeeded != answer correct
-correct answer != contract followed
-contract followed once != reliable
-observation != qualification
-qualification != selection
-selection != authority
-capability != authority
-```
-
-The low-level controls remain available:
-
-```bash
-./localctl runtime start granite
-./localctl runtime status
-./localctl runtime inspect
-./localctl runtime infer "What is 2 + 2?"
-./localctl runtime stop
-```
-
-Learner-facing commands automatically reuse, restart, switch, or reconcile LocalCTL-managed runtime state as needed. The manual runtime commands remain available when process/runtime behavior itself is what you are trying to learn.
-
-LocalCTL refuses to silently claim ownership of an already-responsive runtime that it did not start/manage.
-
----
-
-# Command map
-
-## Start here
-
-```text
+localctl lab
 localctl check
 localctl models
-localctl lab
-localctl audition <model> [--profile=...]
-localctl headtohead <model-a> <model-b> [--pack=...] [--profile=...]
 ```
 
-## Capability work
+## Characterize models
+
+```text
+localctl audition <model> [--profile=default]
+localctl headtohead <model-a> <model-b> [--profile=default]
+localctl verify <exercise> <model> [--profile=default]
+```
+
+## Capability intelligence
+
+```text
+localctl capability <model> [--profile=default] [--json]
+localctl matrix [--profile=default]
+localctl recommend <pack> [--profile=default] [--json]
+localctl requalify <model> [--profile=default] [--run]
+localctl intelligence list
+localctl intelligence show <snapshot-id>
+localctl intelligence audit
+```
+
+## Capability packs and missions
 
 ```text
 localctl packs
 localctl pack show <pack>
-localctl pack run <pack> <model> [--profile=...]
-localctl suite <category> [model] [--profile=...]
-localctl baseline [model] [--all] [--category=...] [--profile=...]
-localctl verify <exercise-or-category> <model> [--runs=N] [--profile=...]
-```
-
-## Learner missions
-
-```text
+localctl pack run <pack> <model> [--profile=default]
 localctl missions
 localctl mission show <mission>
-localctl mission run <mission> <model> [--profile=...]
+localctl mission run <mission> <model> [--profile=default]
 ```
 
-## Real work
+## Real private work
 
 ```text
 <input> | localctl work pr-review <model>
@@ -868,10 +1122,10 @@ localctl mission run <mission> <model> [--profile=...]
 ```text
 localctl profiles
 localctl profile show <profile>
-localctl profile create <name> --context=N --max-tokens=N --temperature=N
+localctl profile create <name> [--context=N] [--max-tokens=N] [--temperature=N]
 ```
 
-## Evidence
+## Historical evidence
 
 ```text
 localctl runs
@@ -883,170 +1137,121 @@ localctl insights [model]
 localctl compare <model-a> <model-b>
 localctl evidence audit
 localctl evidence rebuild-index
-localctl evidence path
 ```
 
-## Manual experiments
+## Exercise lab
 
 ```text
-localctl experiment start <name> [model] [--profile=...] [--pack=...]
-localctl experiment status
-localctl experiment finish
-localctl experiment list
+localctl exercises [category] [--all]
+localctl exercise show <exercise-id>
+localctl exercise run <exercise-id> [model]
+localctl suite <category> [model]
+localctl try <model> <prompt>
+localctl baseline [model] [--all] [--category=...]
 ```
 
-## Model discovery
+## Runtime glass box
 
 ```text
-localctl explore
-localctl explore --live
-```
-
-## Glass-box runtime
-
-```text
-localctl runtime start [model] [--profile=...]
-localctl runtime stop
+localctl runtime start [model] [--profile=default]
 localctl runtime status
 localctl runtime inspect
 localctl runtime infer <prompt>
+localctl runtime stop
 ```
 
 ---
 
-# Current evaluation boundaries
+# Current platform assumptions
 
-LocalCTL v0.3 deliberately prefers deterministic evaluation where a bounded machine rule exists and explicit human judgment where it does not.
+v0.4 is intentionally narrow while the operating model is still being proven.
 
-Built-in evaluator modes currently include:
+Current assumptions include:
 
-```text
-exact
-contains_all
-json_exact
-manual
-```
+- macOS;
+- Apple Silicon;
+- Homebrew `llama-server` at `/opt/homebrew/bin/llama-server`;
+- managed runtime at `http://127.0.0.1:8080`;
+- GGUF discovery under `~/.lmstudio/models`;
+- one LocalCTL-managed `llama-server` at a time;
+- local durable evidence under `~/.localctl`.
 
-The first three are machine-evaluated. `manual` stays pending until a human judges it.
-
-LocalCTL does **not** execute arbitrary model-generated programs on your host simply to get a prettier benchmark score. Generated-code execution needs an explicit isolation/authority boundary before it belongs in the product.
-
----
-
-# Tests and development
-
-Run the full Go test suite:
-
-```bash
-go test -count=1 ./...
-```
-
-Build:
-
-```bash
-go build -o localctl .
-```
-
-GitHub CI enforces:
-
-```text
-gofmt-clean source
-full Go test suite on Linux
-Darwin/arm64 cross-compile
-```
-
-The Darwin compile gate exists because Go treats filename suffixes such as `_linux.go` as build constraints. LocalCTL already learned that lesson the hard way; CI now explicitly protects the Apple Silicon target.
-
-Real `llama-server` integration tests remain opt-in because they require the runtime and models:
-
-```bash
-LOCALCTL_INTEGRATION=1 go test -count=1 -v -run '^TestLlamaServer'
-```
-
-The project intentionally remains dependency-light and easy to inspect while learning Go and systems boundaries.
+If your environment differs, treat the current code as a transparent narrow implementation rather than a generic cross-platform abstraction that does not exist yet.
 
 ---
 
-# Current limitations
+# Current limitations worth knowing
 
-LocalCTL v0.3 is a capability laboratory, not a finished qualification or routing system.
+Some boundaries are especially important when reading v0.4 output:
 
-Current boundaries include:
+- capability thresholds are explicit v1 heuristics, not statistical guarantees;
+- machine matching is conservative and does not yet model hardware-equivalence classes;
+- recommendation is based on current installed models, not the universe of available models;
+- point-in-time process RSS is not a peak-memory profiler;
+- open-ended manual tasks still require human judgment;
+- generated code is not compiled/executed in a safety sandbox yet;
+- historical `compare` remains a broad historical roll-up and is not the same thing as v0.4 strict `recommend`;
+- model discovery is currently LM Studio-directory-specific;
+- freshness is based on the newest comparable run in the capability assessment;
+- a capability snapshot is a derivation at a point in time, not a fact that rewrites old evidence.
 
-- installed model discovery is currently centered on `~/.lmstudio/models`;
-- the development runtime path is the Homebrew `llama-server` path;
-- the managed runtime URL is currently `127.0.0.1:8080`;
-- runtime profiles control context/temperature/output limits but do not yet expose every llama.cpp option;
-- point-in-time process RSS is useful evidence but is not peak memory or complete Metal/unified-memory accounting;
-- time-to-first-token is not yet separately captured;
-- inference timeout/cancellation still needs a deliberate policy comparable to the bounded health check;
-- human judgments are explicit but subjective by design;
-- `gaps` measures evidence coverage, not capability quality;
-- historical `compare` can include mixed experiments/configurations; use `headtohead` for a controlled current comparison;
-- live model discovery is a candidate radar, not a compatibility checker;
-- the built-in packs are practical LocalCTL workloads, not a universal benchmark suite;
-- LocalCTL does not currently perform qualification, routing, authorization, or autonomous remediation;
-- LocalCTL does not allow an LLM to rewrite observations or grade itself into authority.
+Read [`docs/V0.4.md`](docs/V0.4.md) for the exact derivation contract.
 
-These are visible boundaries, not missing caveats.
+Read [`docs/V0.3.md`](docs/V0.3.md) for the evidence foundation underneath it.
 
 ---
 
-# Where LocalCTL is headed
+# Why Go?
 
-v0.3 is about **making trustworthy evidence easy to produce**.
+LocalCTL's current job is close to the machine:
 
-The next planned layers intentionally depend on the evidence v0.3 creates rather than guessing ahead of it:
+- find artifacts;
+- own a process boundary;
+- make HTTP requests;
+- measure what comes back;
+- persist evidence;
+- derive small deterministic state machines from that evidence;
+- fail loudly when the facts are insufficient.
 
-```text
-v0.3 — Find the Edges
+Go is a good fit for that truth layer.
 
-experiment
-measure
-repeat
-retain provenance
-learn what is still unknown
-        │
-        ▼
-v0.4 — Know What To Use
+A later long-lived orchestration or analyst layer may have different needs. The point is not to force every future problem into Go because the first layer is written in Go.
 
-derive capability state
-evidence strength
-freshness
-model roles
-requalification
-        │
-        ▼
-v0.5 — Put Local Models To Work
-
-allow qualified local models to analyze bounded evidence
-cluster failures
-audit conclusions
-propose experiments
-draft useful work
-identify build opportunities
-```
-
-The future analyst boundary matters:
+For now:
 
 ```text
-AI analysis != observation
-AI hypothesis != fact
-AI recommendation != qualification
-AI proposal != authority
+GO
+  machine truth
+  runtime lifecycle
+  experiment evidence
+  deterministic capability intelligence
+
+LATER, IF EARNED
+  richer orchestration
+  analyst workflows
+  longitudinal knowledge interfaces
+  explicit selection policy
 ```
-
-If v0.3 and v0.4 do their jobs, v0.5 can dogfood LocalCTL honestly: local models can help analyze the evidence and propose what to test or build next, while LocalCTL remains responsible for provenance, deterministic checks, and explicit human decisions.
-
-See [`docs/LAB.md`](docs/LAB.md) for the original learner workflow, [`docs/CAPABILITY_LAB.md`](docs/CAPABILITY_LAB.md) for the expanded scenario system, and [`docs/PSEUDOCODE.md`](docs/PSEUDOCODE.md) for the longer systems-learning map.
 
 ---
 
 # The rule
 
 ```text
-Don't merely run local models.
+DO NOT MERELY RUN LOCAL MODELS.
 
-Make their behavior measurable enough that you know
-when they are actually worth using.
+MAKE THEIR BEHAVIOR MEASURABLE ENOUGH
+THAT YOU KNOW WHEN THEY ARE WORTH USING.
 ```
+
+And in v0.4:
+
+```text
+DO NOT MERELY COLLECT EVIDENCE.
+
+KNOW WHICH CLAIMS THAT EVIDENCE SUPPORTS,
+HOW OLD THOSE CLAIMS ARE,
+AND EXACTLY WHAT THEY CAME FROM.
+```
+
+That is LocalCTL.

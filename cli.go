@@ -19,7 +19,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "lab":
 		fmt.Fprintln(stdout, localctlBanner)
 		fmt.Fprintln(stdout)
-		return runV03Lab(stdout, stderr)
+		return runV04Lab(stdout, stderr)
 	case "check":
 		return runCheck(stdout, stderr)
 	case "models":
@@ -48,6 +48,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVerify(args, stdout, stderr)
 	case "work":
 		return runWork(args, stdout, stderr)
+	case "capability":
+		return runCapability(args, stdout, stderr)
+	case "matrix":
+		return runMatrix(args, stdout, stderr)
+	case "recommend":
+		return runRecommend(args, stdout, stderr)
+	case "requalify":
+		return runRequalify(args, stdout, stderr)
+	case "intelligence":
+		return runIntelligence(args, stdout, stderr)
 	case "report":
 		return runReport(args, stdout, stderr)
 	case "gaps":

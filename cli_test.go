@@ -18,7 +18,7 @@ func TestCLI(t *testing.T) {
 			name:       "version",
 			args:       []string{"localctl", "version"},
 			wantExit:   0,
-			wantStdout: "localctl 0.3.0\n",
+			wantStdout: "localctl 0.4.0\n",
 			wantStderr: "",
 		},
 		{
@@ -34,6 +34,27 @@ func TestCLI(t *testing.T) {
 			wantExit:   1,
 			wantStdout: "",
 			wantStderr: "unknown command: garbage\n",
+		},
+		{
+			name:       "capability missing model",
+			args:       []string{"localctl", "capability"},
+			wantExit:   1,
+			wantStdout: "",
+			wantStderr: "usage: localctl capability <model> [--profile=default] [--json]\n",
+		},
+		{
+			name:       "recommend missing pack",
+			args:       []string{"localctl", "recommend"},
+			wantExit:   1,
+			wantStdout: "",
+			wantStderr: "usage: localctl recommend <pack> [--profile=default] [--json]\n",
+		},
+		{
+			name:       "requalify missing model",
+			args:       []string{"localctl", "requalify"},
+			wantExit:   1,
+			wantStdout: "",
+			wantStderr: "usage: localctl requalify <model> [--profile=default] [--run]\n",
 		},
 		{
 			name:       "runtime missing subcommand",
