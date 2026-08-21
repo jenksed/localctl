@@ -43,7 +43,7 @@ type runObservation struct {
 	Input struct {
 		Class string `json:"class,omitempty"`
 	} `json:"input,omitempty"`
-	Machine  machineFingerprintRecord `json:"machine,omitempty"`
+	Machine  machineFingerprintRecord  `json:"machine,omitempty"`
 	LocalCTL localctlFingerprintRecord `json:"localctl,omitempty"`
 	Model    struct {
 		ID                  string `json:"id"`
