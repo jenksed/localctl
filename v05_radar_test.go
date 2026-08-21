@@ -75,7 +75,7 @@ func TestRadarRanksRecencyAndFiltersSpecialists(t *testing.T) {
 		{ID: "example/FreshCoder-7B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "code", "text-generation", "license:apache-2.0"}},
 		{ID: "example/OldCoder-7B", LastModified: now.Add(-120 * 24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "code"}},
 		{ID: "example/TinyEmbed-0.6B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"gguf", "embedding", "feature-extraction"}},
-		{ID: "example/NotGGUF-7B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code"}},
+		{ID: "example/PlainModel-7B", LastModified: now.Add(-24 * time.Hour).Format(time.RFC3339), Downloads: 100, Tags: []string{"code"}},
 	}
 	got := rankRadarResults(results, criteria, machine, nil, now)
 	if len(got) != 1 {
