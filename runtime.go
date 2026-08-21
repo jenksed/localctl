@@ -50,15 +50,15 @@ type chatResponse struct {
 }
 
 type inferenceOutcome struct {
-	Model              string
-	Content            string
-	FinishReason       string
-	PromptTokens       int
-	CompletionTokens   int
-	TotalTokens        int
-	PromptPerSecond    float64
+	Model               string
+	Content             string
+	FinishReason        string
+	PromptTokens        int
+	CompletionTokens    int
+	TotalTokens         int
+	PromptPerSecond     float64
 	GenerationPerSecond float64
-	Elapsed            time.Duration
+	Elapsed             time.Duration
 }
 
 type modelsResponse struct {

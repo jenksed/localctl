@@ -458,16 +458,16 @@ func runJudge(args []string, stdout, stderr io.Writer) int {
 }
 
 type comparisonStats struct {
-	Model       modelArtifact
-	Runs        int
-	Scored      int
-	Pass        int
-	Fail        int
-	Pending     int
-	Errors      int
-	ElapsedMS   []int64
-	Speeds      []float64
-	ByCategory  map[string][2]int
+	Model      modelArtifact
+	Runs       int
+	Scored     int
+	Pass       int
+	Fail       int
+	Pending    int
+	Errors     int
+	ElapsedMS  []int64
+	Speeds     []float64
+	ByCategory map[string][2]int
 }
 
 func runCompare(args []string, stdout, stderr io.Writer) int {

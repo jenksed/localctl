@@ -80,8 +80,8 @@ func TestEvaluateExercise(t *testing.T) {
 			want:     "pass",
 		},
 		{
-			name: "manual pending",
-			item: exercise{Evaluation: evaluationSpec{Kind: evaluationManual}},
+			name:     "manual pending",
+			item:     exercise{Evaluation: evaluationSpec{Kind: evaluationManual}},
 			response: "plausible answer",
 			want:     "pending",
 		},
