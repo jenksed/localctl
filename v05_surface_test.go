@@ -49,8 +49,11 @@ func TestRadarCriteriaCLIStoresSimpleOperatorChoices(t *testing.T) {
 	if got := strings.Join(criteria.Uses, ","); got != "coding,review" {
 		t.Fatalf("unexpected uses: %s", got)
 	}
-	if !strings.Contains(stdout.String(), "machine-derived screening estimate") && machineFingerprint().MemoryBytes > 0 {
-		t.Fatalf("criteria output should expose the machine-derived screening boundary:\n%s", stdout.String())
+	if machineFingerprint().MemoryBytes > 0 {
+		output := stdout.String()
+		if !strings.Contains(output, "machine-derived") || !strings.Contains(output, "discovery screen") {
+			t.Fatalf("criteria output should expose the machine-derived discovery-screen boundary:\n%s", output)
+		}
 	}
 }
 
