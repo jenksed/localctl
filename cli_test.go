@@ -18,7 +18,7 @@ func TestCLI(t *testing.T) {
 			name:       "version",
 			args:       []string{"localctl", "version"},
 			wantExit:   0,
-			wantStdout: "localctl 0.3.0\n",
+			wantStdout: "localctl 0.4.0\n",
 			wantStderr: "",
 		},
 		{
@@ -27,6 +27,27 @@ func TestCLI(t *testing.T) {
 			wantExit:   1,
 			wantStdout: "",
 			wantStderr: "unknown command: garbage\nRun 'localctl help' to see the learner-facing command map.\n",
+		},
+		{
+			name:       "capability missing model",
+			args:       []string{"localctl", "capability"},
+			wantExit:   1,
+			wantStdout: "",
+			wantStderr: "usage: localctl capability <model> [--profile=default] [--json]\n",
+		},
+		{
+			name:       "recommend missing pack",
+			args:       []string{"localctl", "recommend"},
+			wantExit:   1,
+			wantStdout: "",
+			wantStderr: "usage: localctl recommend <pack> [--profile=default] [--json]\n",
+		},
+		{
+			name:       "requalify missing model",
+			args:       []string{"localctl", "requalify"},
+			wantExit:   1,
+			wantStdout: "",
+			wantStderr: "usage: localctl requalify <model> [--profile=default] [--run]\n",
 		},
 		{
 			name:       "runtime missing subcommand",
@@ -76,7 +97,7 @@ func TestRootCLIShowsLearnerHelp(t *testing.T) {
 		if code := run(args, &stdout, &stderr); code != 0 {
 			t.Fatalf("help path %v returned %d: %s", args, code, stderr.String())
 		}
-		for _, want := range []string{"Start", "localctl lab", "Compare and learn", "Read the evidence", "Glass box"} {
+		for _, want := range []string{"Start", "localctl lab", "Compare and learn", "Read the evidence", "Glass box", "localctl capability", "localctl recommend"} {
 			if !strings.Contains(stdout.String(), want) {
 				t.Fatalf("help path %v missing %q:\n%s", args, want, stdout.String())
 			}
@@ -85,9 +106,6 @@ func TestRootCLIShowsLearnerHelp(t *testing.T) {
 }
 
 func TestRuntimeInferJoinsPromptArguments(t *testing.T) {
-	// The network path is deliberately not invoked here; this regression is
-	// guarded at the CLI-source level by ensuring multi-word prompt handling is
-	// part of the public command behavior rather than documenting a one-arg trap.
 	if !strings.Contains("runtime infer <prompt>", "<prompt>") {
 		t.Fatal("sanity check failed")
 	}

@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestV03Version(t *testing.T) {
-	if localctlVersion != "0.3.0" {
-		t.Fatalf("expected v0.3.0, got %s", localctlVersion)
+func TestReleaseVersion(t *testing.T) {
+	if localctlVersion != "0.4.0" {
+		t.Fatalf("expected v0.4.0, got %s", localctlVersion)
 	}
 }
 
