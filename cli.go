@@ -22,11 +22,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "models":
 		return runModels(stdout, stderr)
 
+	case "explore":
+		return runExplore(args, stdout, stderr)
+
 	case "exercises":
 		return runExercises(args, stdout, stderr)
 
 	case "exercise":
 		return runExercise(args, stdout, stderr)
+
+	case "suite":
+		return runSuite(args, stdout, stderr)
 
 	case "try":
 		return runTry(args, stdout, stderr)
@@ -45,6 +51,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	case "compare":
 		return runCompare(args, stdout, stderr)
+
+	case "evidence":
+		return runEvidence(args, stdout, stderr)
 
 	case "runtime":
 		return runRuntime(args, stdout, stderr)
