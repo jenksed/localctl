@@ -90,14 +90,16 @@ func selectedCandidateIDs(state exploreState) map[string]bool {
 }
 
 func candidateInstalled(candidate modelRadarCandidate, models []modelArtifact) bool {
-	needles := candidateFamilyNeedles(candidate)
+	candidateNeedles := candidateFamilyNeedles(candidate)
 	for _, model := range models {
-		for _, needle := range needles {
-			if len(needle) < 4 {
+		for _, candidateNeedle := range candidateNeedles {
+			if len(candidateNeedle) < 4 {
 				continue
 			}
-			if strings.Contains(model.ID, needle) || strings.Contains(needle, model.ID) {
-				return true
+			for _, modelNeedle := range modelFamilyNeedles(model) {
+				if candidateNeedle == modelNeedle || strings.Contains(candidateNeedle, modelNeedle) || strings.Contains(modelNeedle, candidateNeedle) {
+					return true
+				}
 			}
 		}
 	}
@@ -120,6 +122,29 @@ func candidateFamilyNeedles(candidate modelRadarCandidate) []string {
 	if candidate.Repository != "" {
 		parts := strings.Split(strings.Trim(candidate.Repository, "/"), "/")
 		add(parts[len(parts)-1])
+	}
+	return result
+}
+
+func modelFamilyNeedles(model modelArtifact) []string {
+	seen := map[string]bool{}
+	var result []string
+	add := func(value string) {
+		value = modelSlug(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	add(model.ID)
+	base := strings.TrimSuffix(model.Name, filepath.Ext(model.Name))
+	add(base)
+	if quant := quantizationFromName(model.Name); quant != "" {
+		quantSlug := modelSlug(quant)
+		baseSlug := modelSlug(base)
+		baseSlug = strings.TrimSuffix(baseSlug, "-"+quantSlug)
+		add(baseSlug)
 	}
 	return result
 }
