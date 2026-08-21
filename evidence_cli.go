@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 func runEvidence(args []string, stdout, stderr io.Writer) int {
@@ -61,6 +62,8 @@ func runEvidenceAudit(stdout, stderr io.Writer) int {
 	missingFromIndex := 0
 	duplicateIndexEntries := 0
 	judgments := 0
+	incompleteV3 := 0
+	v3MissingFields := map[string]int{}
 
 	for _, count := range indexIDs {
 		if count > 1 {
@@ -86,6 +89,15 @@ func runEvidenceAudit(stdout, stderr io.Writer) int {
 		if indexIDs[record.RunID] == 0 {
 			missingFromIndex++
 		}
+		if record.SchemaVersion >= 3 {
+			missing := v3ObservationMissing(record)
+			if len(missing) > 0 {
+				incompleteV3++
+				for _, field := range missing {
+					v3MissingFields[field]++
+				}
+			}
+		}
 	}
 
 	fmt.Fprintln(stdout, "LocalCTL evidence audit")
@@ -101,6 +113,20 @@ func runEvidenceAudit(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "missing prompts:        %d\n", missingPrompt)
 	fmt.Fprintf(stdout, "missing responses:      %d\n", missingResponse)
 	fmt.Fprintf(stdout, "human judgments:        %d\n", judgments)
+	fmt.Fprintf(stdout, "incomplete v3 records:  %d\n", incompleteV3)
+
+	if len(v3MissingFields) > 0 {
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Missing v3 provenance fields")
+		var names []string
+		for name := range v3MissingFields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(stdout, "%-30s %d\n", name, v3MissingFields[name])
+		}
+	}
 
 	var schemaVersions []int
 	for version := range schemaCounts {
@@ -129,11 +155,11 @@ func runEvidenceAudit(stdout, stderr io.Writer) int {
 		}
 	}
 
-	healthy := indexErr == nil && missingPrompt == 0 && missingResponse == 0 && missingFromIndex == 0 && duplicateIndexEntries == 0
+	healthy := indexErr == nil && missingPrompt == 0 && missingResponse == 0 && missingFromIndex == 0 && duplicateIndexEntries == 0 && incompleteV3 == 0
 	fmt.Fprintln(stdout)
 	if healthy {
 		fmt.Fprintln(stdout, "history status: COMPLETE")
-		fmt.Fprintln(stdout, "Every discovered observation has its required files and an index entry.")
+		fmt.Fprintln(stdout, "Every discovered observation has its required files and index coverage; v3 runs also satisfy the v0.3 provenance contract.")
 		fmt.Fprintln(stdout, "Older schema versions remain historical evidence; LocalCTL does not rewrite them.")
 		return 0
 	}
@@ -146,5 +172,41 @@ func runEvidenceAudit(stdout, stderr io.Writer) int {
 	if missingPrompt > 0 || missingResponse > 0 {
 		fmt.Fprintln(stdout, "Missing prompt/response artifacts cannot be reconstructed honestly from the index alone.")
 	}
+	if incompleteV3 > 0 {
+		fmt.Fprintln(stdout, "Incomplete v3 provenance is reported rather than retroactively invented. Re-run the affected workload if stronger current evidence is needed.")
+	}
 	return 1
+}
+
+func v3ObservationMissing(record runObservation) []string {
+	var missing []string
+	add := func(name string, condition bool) {
+		if condition {
+			missing = append(missing, name)
+		}
+	}
+	add("experiment.id", record.Experiment.ID == "")
+	add("exercise.version", record.Exercise.Version == "")
+	add("exercise.prompt_sha256", record.Exercise.PromptSHA256 == "")
+	add("pack.id", record.Pack.ID == "")
+	add("pack.version", record.Pack.Version == "")
+	add("input.class", record.Input.Class != "canonical" && record.Input.Class != "private")
+	add("machine.os", record.Machine.OS == "")
+	add("machine.architecture", record.Machine.Architecture == "")
+	add("localctl.version", record.LocalCTL.Version == "")
+	add("model.sha256", record.Model.SHA256 == "")
+	add("runtime.kind", record.Runtime.Kind == "")
+	add("runtime.url", record.Runtime.URL == "")
+	add("profile.id", record.Profile.ID == "")
+	add("configuration.context", record.Configuration.Context <= 0)
+	add("configuration.max_tokens", record.Configuration.MaxTokens <= 0)
+	add("validation.authority", record.Validation.Authority == "")
+	if record.Result.Status == "succeeded" {
+		add("result.response_sha256", record.Result.ResponseSHA256 == "")
+	}
+	return missing
+}
+
+func joinMissingFields(fields []string) string {
+	return strings.Join(fields, ", ")
 }
