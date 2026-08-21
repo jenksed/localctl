@@ -125,15 +125,29 @@ func loadActiveExperiment() (*experimentRecord, error) {
 
 func currentObservationScope(item exercise) observationScope {
 	if scopedObservation != nil {
-		return *scopedObservation
+		scope := *scopedObservation
+		if scope.Pack.ID == "" || scope.Pack.ID == "audition" {
+			scope.Pack = inferredPackForExercise(item)
+		}
+		if scope.InputClass == "" {
+			scope.InputClass = inferredInputClass(item)
+		}
+		return scope
 	}
 	if record, err := loadActiveExperiment(); err == nil && record != nil && record.Status == "running" {
 		profile, profileErr := resolveProfile(record.ProfileID)
 		if profileErr != nil {
 			profile = defaultProfile()
 		}
-		pack, _ := findPack(record.PackID)
-		return observationScope{ExperimentID: record.ID, SessionID: record.SessionID, Experiment: record.Name, ExperimentKind: record.Kind, Profile: profile, Pack: pack, InputClass: record.InputClass}
+		pack, packErr := findPack(record.PackID)
+		if packErr != nil || pack.ID == "" {
+			pack = inferredPackForExercise(item)
+		}
+		inputClass := record.InputClass
+		if inputClass == "" {
+			inputClass = inferredInputClass(item)
+		}
+		return observationScope{ExperimentID: record.ID, SessionID: record.SessionID, Experiment: record.Name, ExperimentKind: record.Kind, Profile: profile, Pack: pack, InputClass: inputClass}
 	}
 	profile := defaultProfile()
 	pack := inferredPackForExercise(item)
@@ -189,7 +203,7 @@ func runExperiment(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		record := experimentRecord{SchemaVersion: 1, ID: newExperimentID(time.Now()), Name: name, Kind: "manual", ProfileID: profile.ID, PackID: pack.ID, PackVersion: pack.Version, InputClass: "canonical", StartedAt: time.Now(), Status: "running"}
+		record := experimentRecord{SchemaVersion: 1, ID: newExperimentID(time.Now()), SessionID: activeSessionID, Name: name, Kind: "manual", ProfileID: profile.ID, PackID: pack.ID, PackVersion: pack.Version, InputClass: "canonical", StartedAt: time.Now(), Status: "running"}
 		if modelRef != "" {
 			model, modelErr := resolveModel(modelRef)
 			if modelErr != nil {
