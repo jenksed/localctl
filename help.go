@@ -1,0 +1,42 @@
+package main
+
+import (
+	"fmt"
+	"io"
+)
+
+func runHelp(stdout io.Writer) int {
+	fmt.Fprintf(stdout, "LocalCTL %s — local model capability lab\n\n", localctlVersion)
+	fmt.Fprintln(stdout, "Start")
+	fmt.Fprintln(stdout, "  localctl lab                         show machine state and the best next step")
+	fmt.Fprintln(stdout, "  localctl models                      list installed GGUF models")
+	fmt.Fprintln(stdout, "  localctl audition <model>            guided model characterization")
+	fmt.Fprintln(stdout, "  localctl explore                     find new candidates without re-showing installed models")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Compare and learn")
+	fmt.Fprintln(stdout, "  localctl headtohead <a> <b>          same-pack controlled comparison")
+	fmt.Fprintln(stdout, "  localctl verify <exercise> <model>   repeatability check")
+	fmt.Fprintln(stdout, "  localctl missions                    intent-oriented learning paths")
+	fmt.Fprintln(stdout, "  localctl packs                       versioned workload packs")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Use your own work")
+	fmt.Fprintln(stdout, "  <input> | localctl work <kind> <model>")
+	fmt.Fprintln(stdout, "  localctl try <model> <prompt>")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Read the evidence")
+	fmt.Fprintln(stdout, "  localctl report <model>              historical characterization")
+	fmt.Fprintln(stdout, "  localctl gaps <model>                under-tested areas and next experiment")
+	fmt.Fprintln(stdout, "  localctl runs                         recent durable runs")
+	fmt.Fprintln(stdout, "  localctl show <run-id>                inspect one run")
+	fmt.Fprintln(stdout, "  localctl judge <run-id> ...           attach human judgment")
+	fmt.Fprintln(stdout, "  localctl evidence audit               validate stored evidence")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "Glass box")
+	fmt.Fprintln(stdout, "  localctl runtime status|inspect|start|stop|infer")
+	fmt.Fprintln(stdout, "  localctl check")
+	fmt.Fprintln(stdout, "  localctl profiles")
+	fmt.Fprintln(stdout, "  localctl exercises [category] [--all]")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "LocalCTL records observations. Characterization is not qualification, and no command here grants model authority.")
+	return 0
+}
