@@ -7,7 +7,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,6 +64,8 @@ type inferenceOutcome struct {
 	PromptPerSecond     float64
 	GenerationPerSecond float64
 	Elapsed             time.Duration
+	RuntimeRSSBefore    int64
+	RuntimeRSSAfter     int64
 }
 
 type modelsResponse struct {
@@ -100,12 +105,7 @@ func performInferenceWithProfile(baseURL, requestedModel, prompt string, profile
 	if profile.MaxTokens <= 0 {
 		profile = defaultProfile()
 	}
-	payload := chatRequest{
-		Model: requestedModel,
-		Messages: []message{{Role: "user", Content: prompt}},
-		Temperature: profile.Temperature,
-		MaxTokens: profile.MaxTokens,
-	}
+	payload := chatRequest{Model: requestedModel, Messages: []message{{Role: "user", Content: prompt}}, Temperature: profile.Temperature, MaxTokens: profile.MaxTokens}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return inferenceOutcome{}, fmt.Errorf("could not encode request: %w", err)
@@ -115,34 +115,51 @@ func performInferenceWithProfile(baseURL, requestedModel, prompt string, profile
 		return inferenceOutcome{}, fmt.Errorf("could not create inference request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	pid := 0
+	if baseURL == runtimeURL {
+		if state, stateErr := readRuntimeState(); stateErr == nil {
+			pid = state.PID
+		}
+	}
+	rssBefore := processResidentBytes(pid)
 	startedAt := time.Now()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return inferenceOutcome{}, fmt.Errorf("inference request failed: %w", err)
+		return inferenceOutcome{Elapsed: time.Since(startedAt), RuntimeRSSBefore: rssBefore, RuntimeRSSAfter: processResidentBytes(pid)}, fmt.Errorf("inference request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return inferenceOutcome{}, fmt.Errorf("inference failed: HTTP %s", resp.Status)
+		return inferenceOutcome{Elapsed: time.Since(startedAt), RuntimeRSSBefore: rssBefore, RuntimeRSSAfter: processResidentBytes(pid)}, fmt.Errorf("inference failed: HTTP %s", resp.Status)
 	}
 	var result chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return inferenceOutcome{}, fmt.Errorf("could not decode inference response: %w", err)
+		return inferenceOutcome{Elapsed: time.Since(startedAt), RuntimeRSSBefore: rssBefore, RuntimeRSSAfter: processResidentBytes(pid)}, fmt.Errorf("could not decode inference response: %w", err)
 	}
 	if len(result.Choices) == 0 {
-		return inferenceOutcome{}, fmt.Errorf("inference response contained no choices")
+		return inferenceOutcome{Elapsed: time.Since(startedAt), RuntimeRSSBefore: rssBefore, RuntimeRSSAfter: processResidentBytes(pid)}, fmt.Errorf("inference response contained no choices")
 	}
 	choice := result.Choices[0]
 	return inferenceOutcome{
-		Model:               result.Model,
-		Content:             choice.Message.Content,
-		FinishReason:        choice.FinishReason,
-		PromptTokens:        result.Usage.PromptTokens,
-		CompletionTokens:    result.Usage.CompletionTokens,
-		TotalTokens:         result.Usage.TotalTokens,
-		PromptPerSecond:     result.Timings.PromptPerSecond,
-		GenerationPerSecond: result.Timings.PredictedPerSecond,
-		Elapsed:             time.Since(startedAt),
+		Model: result.Model, Content: choice.Message.Content, FinishReason: choice.FinishReason,
+		PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens, TotalTokens: result.Usage.TotalTokens,
+		PromptPerSecond: result.Timings.PromptPerSecond, GenerationPerSecond: result.Timings.PredictedPerSecond,
+		Elapsed: time.Since(startedAt), RuntimeRSSBefore: rssBefore, RuntimeRSSAfter: processResidentBytes(pid),
 	}, nil
+}
+
+func processResidentBytes(pid int) int64 {
+	if pid <= 0 {
+		return 0
+	}
+	output, err := exec.Command("/bin/ps", "-p", strconv.Itoa(pid), "-o", "rss=").Output()
+	if err != nil {
+		return 0
+	}
+	kb, err := strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return kb * 1024
 }
 
 func managedModelArtifact(baseURL string) (modelArtifact, bool) {
@@ -174,7 +191,6 @@ func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 	}
 	startedAt := time.Now()
 	outcome, inferenceErr := performInferenceWithProfile(baseURL, inferenceModelID(baseURL), prompt, profile)
-
 	savedRunID := ""
 	if model, managed := managedModelArtifact(baseURL); managed {
 		item := exercise{ID: "runtime-infer", Title: "Runtime inference", Category: "freeform", Difficulty: "unscored", Description: "A direct managed-runtime inference. The observation is saved; correctness requires later judgment.", Prompt: prompt, Evaluation: evaluationSpec{Kind: evaluationManual}}
@@ -188,7 +204,6 @@ func runtimeInfer(baseURL, prompt string, stdout, stderr io.Writer) int {
 			savedRunID = record.RunID
 		}
 	}
-
 	if inferenceErr != nil {
 		fmt.Fprintln(stderr, inferenceErr)
 		if savedRunID != "" {
