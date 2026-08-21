@@ -44,8 +44,23 @@ func TestPersistObservationAndJudgment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if record.SchemaVersion != 2 {
+		t.Fatalf("expected evidence schema 2, got %d", record.SchemaVersion)
+	}
 	if record.Evaluation.Status != "pass" {
 		t.Fatalf("expected pass, got %#v", record.Evaluation)
+	}
+	if record.Exercise.PromptSHA256 == "" || record.Result.ResponseSHA256 == "" {
+		t.Fatalf("expected prompt and response hashes, got %#v", record)
+	}
+	if record.Result.VisibleCharacters != len([]rune(outcome.Content)) {
+		t.Fatalf("unexpected visible character count: %d", record.Result.VisibleCharacters)
+	}
+	if record.Result.EmptyVisibleOutput {
+		t.Fatalf("non-empty response was marked empty")
+	}
+	if record.Model.ArtifactMetadataKey == "" {
+		t.Fatalf("expected artifact metadata key")
 	}
 
 	for _, name := range []string{"observation.json", "prompt.txt", "response.txt"} {
