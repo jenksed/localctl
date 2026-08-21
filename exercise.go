@@ -46,6 +46,9 @@ func allExerciseCatalog() []exercise {
 	items := append([]exercise{}, baselineExerciseCatalog()...)
 	items = append(items, expandedExerciseCatalog()...)
 	items = append(items, developerWorkflowExerciseCatalog()...)
+	items = append(items, linuxInvestigationExerciseCatalog()...)
+	items = append(items, dockerInvestigationExerciseCatalog()...)
+	items = append(items, kubernetesInvestigationExerciseCatalog()...)
 	return items
 }
 
