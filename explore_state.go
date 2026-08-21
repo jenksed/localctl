@@ -76,6 +76,19 @@ func candidateKey(candidate modelRadarCandidate) string {
 	return modelSlug(candidate.Name)
 }
 
+func selectedCandidateIDs(state exploreState) map[string]bool {
+	result := map[string]bool{}
+	for _, item := range state.Selected {
+		result[candidateKey(item.Candidate)] = true
+	}
+	for _, curated := range m1ProRadar {
+		if candidateSelected(curated, state) {
+			result[candidateKey(curated)] = true
+		}
+	}
+	return result
+}
+
 func candidateInstalled(candidate modelRadarCandidate, models []modelArtifact) bool {
 	needles := candidateFamilyNeedles(candidate)
 	for _, model := range models {
