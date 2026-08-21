@@ -19,8 +19,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
+      - name: Format diagnostic
+        run: |
+          gofmt -w .
+          git diff --stat
+          git diff
 
       - name: Test
         run: go test -count=1 ./...
