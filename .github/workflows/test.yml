@@ -9,6 +9,32 @@ on:
   pull_request:
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Frontend production build
+        run: npm run build
+
+      - name: Verify embedded assets are current
+        run: git diff --exit-code -- dist
+
   go-test:
     runs-on: ubuntu-latest
     steps:
@@ -33,6 +59,35 @@ jobs:
 
       - name: Test
         run: go test -count=1 ./...
+
+      - name: Production build
+        run: go build -o /tmp/localctl-ci .
+
+      - name: Web lab startup smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$(mktemp -d)"
+          /tmp/localctl-ci lab web --port=17331 > /tmp/localctl-web.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for _ in $(seq 1 40); do
+            if curl --fail --silent --show-error http://127.0.0.1:17331/api/v1/bootstrap > /tmp/bootstrap.json; then
+              ready=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat /tmp/localctl-web.log
+            exit 1
+          fi
+          curl --fail --silent --show-error http://127.0.0.1:17331/ | grep -q 'LocalCTL'
+          curl --fail --silent --show-error http://127.0.0.1:17331/app.js > /dev/null
+          kill "$pid"
+          wait "$pid" || true
+          trap - EXIT
 
       - name: Darwin arm64 compile check
         env:
