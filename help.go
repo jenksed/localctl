@@ -9,6 +9,7 @@ func runHelp(stdout io.Writer) int {
 	fmt.Fprintf(stdout, "LocalCTL %s — local model capability lab\n\n", localctlVersion)
 	fmt.Fprintln(stdout, "Start")
 	fmt.Fprintln(stdout, "  localctl lab                         show this machine and the learning loop")
+	fmt.Fprintln(stdout, "  localctl lab web                     run the GUI on http://127.0.0.1:7331")
 	fmt.Fprintln(stdout, "  localctl models                      list installed GGUF models")
 	fmt.Fprintln(stdout, "  localctl audition <model>            guided model characterization")
 	fmt.Fprintln(stdout, "  localctl explore                     find new candidates without re-showing installed models")
