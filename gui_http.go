@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -12,8 +13,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -67,6 +70,10 @@ func runWebLab(args []string, stdout, stderr io.Writer) int {
 	port := 7331
 	for _, arg := range args {
 		switch {
+		case arg == "--help" || arg == "-h":
+			fmt.Fprintln(stdout, "usage: localctl lab web [--port=<1-65535>]")
+			fmt.Fprintln(stdout, "Runs the LocalCTL web lab on loopback only; default http://127.0.0.1:7331")
+			return 0
 		case strings.HasPrefix(arg, "--port="):
 			value := strings.TrimPrefix(arg, "--port=")
 			parsed, err := strconv.Atoi(value)
@@ -95,10 +102,32 @@ func runWebLab(args []string, stdout, stderr io.Writer) int {
 	defer listener.Close()
 	fmt.Fprintf(stdout, "LocalCTL web lab\nhttp://%s\n\n", address)
 	fmt.Fprintln(stdout, "Bound to loopback only. Ctrl-C stops the UI server; durable jobs/evidence remain inspectable on restart.")
+
 	server := &http.Server{Handler: web.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
-	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fmt.Fprintf(stderr, "web lab stopped: %v\n", err)
-		return 1
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(stderr, "web lab stopped: %v\n", err)
+			return 1
+		}
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(stderr, "web lab shutdown failed: %v\n", err)
+			return 1
+		}
+		err := <-serveErr
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(stderr, "web lab stopped: %v\n", err)
+			return 1
+		}
 	}
 	return 0
 }
