@@ -18,6 +18,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "localctl %s\n", localctlVersion)
 		return 0
 	case "lab":
+		if len(args) >= 3 && (args[2] == "web" || args[2] == "--web") {
+			return runWebLab(args[3:], stdout, stderr)
+		}
 		fmt.Fprintln(stdout, localctlBanner)
 		fmt.Fprintln(stdout)
 		return runV04Lab(stdout, stderr)
